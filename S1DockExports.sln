@@ -1,0 +1,28 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.14.36603.0 d17.14
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "S1DockExports", "S1DockExports.csproj", "{760DD82C-F9EF-0816-3074-5E011DCB442C}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		CrossCompat|Any CPU = CrossCompat|Any CPU
+		Il2cpp|Any CPU = Il2cpp|Any CPU
+		Mono|Any CPU = Mono|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{760DD82C-F9EF-0816-3074-5E011DCB442C}.CrossCompat|Any CPU.ActiveCfg = CrossCompat|Any CPU
+		{760DD82C-F9EF-0816-3074-5E011DCB442C}.CrossCompat|Any CPU.Build.0 = CrossCompat|Any CPU
+		{760DD82C-F9EF-0816-3074-5E011DCB442C}.Il2cpp|Any CPU.ActiveCfg = Il2cpp|Any CPU
+		{760DD82C-F9EF-0816-3074-5E011DCB442C}.Il2cpp|Any CPU.Build.0 = Il2cpp|Any CPU
+		{760DD82C-F9EF-0816-3074-5E011DCB442C}.Mono|Any CPU.ActiveCfg = Mono|Any CPU
+		{760DD82C-F9EF-0816-3074-5E011DCB442C}.Mono|Any CPU.Build.0 = Mono|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {E8C60346-FE1F-4B43-911B-20733E09DE80}
+	EndGlobalSection
+EndGlobal
