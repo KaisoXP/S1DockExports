@@ -1,3 +1,4 @@
+![AppLogo](https://github.com/KaisoXP/S1DockExports/blob/main/DE.png)
 # ⚓ Dock Exports Mod – Schedule I (MelonLoader + Harmony)
 
 > “Heard you control the docks. I move product overseas.” – The Broker

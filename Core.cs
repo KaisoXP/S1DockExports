@@ -34,7 +34,7 @@ namespace S1DockExports
 
             // Build the path to MelonLoader\Il2CppAssemblies
             // (Use the same path you reference in your .csproj)
-            var gameDir = MelonUtils.GameDirectory; // e.g., ...\Schedule I
+            var gameDir = MelonEnvironment.GameRootDirectory; // e.g., ...\Schedule I
             var probe = Path.Combine(gameDir, "MelonLoader", "Il2CppAssemblies", file);
             if (File.Exists(probe))
             {
