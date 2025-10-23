@@ -1,10 +1,11 @@
-﻿using System;
+﻿#nullable enable
+using System;
 using System.IO;
 using System.Reflection;
 using MelonLoader;
 
 [assembly: MelonInfo(typeof(S1DockExports.Core), "S1DockExports", "0.0.1", "KaisoXP")]
-[assembly: MelonGame(null, "Schedule I")]
+[assembly: MelonGame("TVGS", "Schedule I")]
 
 namespace S1DockExports
 {
@@ -12,7 +13,7 @@ namespace S1DockExports
     {
         public override void OnInitializeMelon()
         {
-            // Ensure any missing runtime deps (like FishNet) resolve from Il2CppAssemblies
+            // Ensure missing runtime dependencies (for example FishNet) resolve from Il2CppAssemblies.
             AppDomain.CurrentDomain.AssemblyResolve += ResolveFromIl2CppAssemblies;
 
             MelonLogger.Msg("S1DockExports initialized.");
@@ -20,31 +21,38 @@ namespace S1DockExports
 
         private Assembly? ResolveFromIl2CppAssemblies(object? sender, ResolveEventArgs args)
         {
-            // Map requested name -> exact Il2Cpp filename(s) that exist in the game
-            string name = new AssemblyName(args.Name).Name ?? string.Empty;
+            // Determine the simple assembly name.
+            var requestedName = new AssemblyName(args.Name).Name ?? string.Empty;
 
-            // Only intercept FishNet (and Steamworks if needed in future)
-            string? file = name switch
+            // Map requested assembly name to the actual Il2Cpp file shipped with the game.
+            string? fileName = requestedName switch
             {
                 "FishNet.Runtime" => "Il2CppFishNet.Runtime.dll",
+                // Uncomment if you later rely on Steamworks.NET types that S1API uses at runtime.
                 // "com.rlabrecque.steamworks.net" => "Il2Cppcom.rlabrecque.steamworks.net.dll",
                 _ => null
             };
-            if (file == null) return null;
+            if (fileName is null)
+                return null;
 
-            // Build the path to MelonLoader\Il2CppAssemblies
-            // (Use the same path you reference in your .csproj)
-            var gameDir = MelonEnvironment.GameRootDirectory; // e.g., ...\Schedule I
-            var probe = Path.Combine(gameDir, "MelonLoader", "Il2CppAssemblies", file);
-            if (File.Exists(probe))
+            // Do not rely on MelonEnvironment at compile time. AppContext.BaseDirectory points at the game root under ML.
+            string gameDirectory = AppContext.BaseDirectory;
+
+            string il2cppAssembliesDirectory = Path.Combine(gameDirectory, "MelonLoader", "Il2CppAssemblies");
+            string probePath = Path.Combine(il2cppAssembliesDirectory, fileName);
+
+            if (!File.Exists(probePath))
+                return null;
+
+            try
             {
-                try { return Assembly.LoadFrom(probe); }
-                catch (Exception ex)
-                {
-                    MelonLogger.Warning($"Failed to load '{file}' from Il2CppAssemblies: {ex.Message}");
-                }
+                return Assembly.LoadFrom(probePath);
             }
-            return null; // let default probing continue
+            catch (Exception ex)
+            {
+                MelonLogger.Warning($"Failed to load '{fileName}' from Il2CppAssemblies: {ex.Message}");
+                return null;
+            }
         }
     }
 }
