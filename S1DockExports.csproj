@@ -1,0 +1,190 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+	<ItemGroup>
+		<EmbeddedResource Include="DE.png">
+			
+		</EmbeddedResource>
+	</ItemGroup>
+
+
+	<PropertyGroup>
+		<TargetFramework>netstandard2.1</TargetFramework>
+		<ImplicitUsings>enable</ImplicitUsings>
+		<RootNamespace>S1DockExports</RootNamespace>
+		<LangVersion>default</LangVersion>
+		<NeutralLanguage>en-US</NeutralLanguage>
+		<Configurations>Il2cpp;CrossCompat</Configurations>
+		<AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+		<EnableDefaultCompileItems>true</EnableDefaultCompileItems>
+
+		<!-- Per-machine override:  $env:S1_GAME="D:\SteamLibrary\steamapps\common\Schedule I" -->
+		<GamePath Condition="'$(GamePath)'=='' and '$(S1_GAME)'!=''">$(S1_GAME)</GamePath>
+		<!-- Default path (edit if different) -->
+		<GamePath Condition="'$(GamePath)'==''">C:\Program Files (x86)\Steam\steamapps\common\Schedule I</GamePath>
+	</PropertyGroup>
+
+	<!-- Shared paths for IL2CPP install -->
+	<PropertyGroup>
+		<Il2CppAssembliesPath>$(GamePath)\MelonLoader\Il2CppAssemblies</Il2CppAssembliesPath>
+		<MelonLoaderNet35>$(GamePath)\MelonLoader\net35</MelonLoaderNet35>
+		<MelonLoaderNet6>$(GamePath)\MelonLoader\net6</MelonLoaderNet6>
+		<ModsPath>$(GamePath)\Mods</ModsPath>
+	</PropertyGroup>
+
+	<!-- ==================== CrossCompat (no Assembly-CSharp ref) ==================== -->
+	<PropertyGroup Condition="'$(Configuration)'=='CrossCompat'">
+		<DefineConstants>CROSS_COMPAT</DefineConstants>
+		<AssemblyName>S1DockExports</AssemblyName>
+	</PropertyGroup>
+
+	<ItemGroup Condition="'$(Configuration)'=='CrossCompat'">
+		<!-- Unity + TextMeshPro (from Il2CppAssemblies) -->
+		<Reference Include="UnityEngine.CoreModule">
+			<HintPath>$(Il2CppAssembliesPath)\UnityEngine.CoreModule.dll</HintPath>
+		</Reference>
+		<Reference Include="UnityEngine.UI">
+			<HintPath>$(Il2CppAssembliesPath)\UnityEngine.UI.dll</HintPath>
+		</Reference>
+		<Reference Include="UnityEngine.UIElementsModule">
+			<HintPath>$(Il2CppAssembliesPath)\UnityEngine.UIElementsModule.dll</HintPath>
+		</Reference>
+		<Reference Include="UnityEngine.UIModule">
+			<HintPath>$(Il2CppAssembliesPath)\UnityEngine.UIModule.dll</HintPath>
+		</Reference>
+		<Reference Include="UnityEngine.TextRenderingModule">
+			<HintPath>$(Il2CppAssembliesPath)\UnityEngine.TextRenderingModule.dll</HintPath>
+		</Reference>
+		<Reference Include="Unity.TextMeshPro">
+			<HintPath>$(Il2CppAssembliesPath)\Unity.TextMeshPro.dll</HintPath>
+		</Reference>
+
+		<!-- Third-party Il2Cpp libs -->
+		<Reference Include="Il2Cppcom.rlabrecque.steamworks.net">
+			<HintPath>$(Il2CppAssembliesPath)\Il2Cppcom.rlabrecque.steamworks.net.dll</HintPath>
+		</Reference>
+		<Reference Include="Il2CppFishNet.Runtime">
+			<HintPath>$(Il2CppAssembliesPath)\Il2CppFishNet.Runtime.dll</HintPath>
+		</Reference>
+
+		<!-- Il2Cpp base BCLs sometimes needed by Unity assemblies -->
+		<Reference Include="Il2Cppmscorlib">
+			<HintPath>$(Il2CppAssembliesPath)\Il2Cppmscorlib.dll</HintPath>
+		</Reference>
+		<Reference Include="Il2CppSystem">
+			<HintPath>$(Il2CppAssembliesPath)\Il2CppSystem.dll</HintPath>
+		</Reference>
+		<Reference Include="Il2CppSystem.Core">
+			<HintPath>$(Il2CppAssembliesPath)\Il2CppSystem.Core.dll</HintPath>
+		</Reference>
+
+		<!-- MelonLoader compile-time stubs -->
+		<Reference Include="MelonLoader">
+			<HintPath>$(MelonLoaderNet35)\MelonLoader.dll</HintPath>
+		</Reference>
+		<Reference Include="0Harmony">
+			<HintPath>$(MelonLoaderNet35)\0Harmony.dll</HintPath>
+		</Reference>
+		<Reference Include="Newtonsoft.Json">
+			<HintPath>$(MelonLoaderNet35)\Newtonsoft.Json.dll</HintPath>
+		</Reference>
+
+		<!-- Needed for Il2CppObjectBase at compile-time -->
+		<Reference Include="Il2CppInterop.Runtime">
+			<HintPath>$(MelonLoaderNet6)\Il2CppInterop.Runtime.dll</HintPath>
+		</Reference>
+	</ItemGroup>
+
+	<!-- ==================== Il2cpp (game assembly referenced) ==================== -->
+	<PropertyGroup Condition="'$(Configuration)'=='Il2cpp'">
+		<DefineConstants>IL2CPP</DefineConstants>
+		<AssemblyName>S1DockExports_Il2cpp</AssemblyName>
+	</PropertyGroup>
+
+	<ItemGroup Condition="'$(Configuration)'=='Il2cpp'">
+		<Reference Include="Assembly-CSharp">
+			<HintPath>$(Il2CppAssembliesPath)\Assembly-CSharp.dll</HintPath>
+		</Reference>
+		<Reference Include="UnityEngine.CoreModule">
+			<HintPath>$(Il2CppAssembliesPath)\UnityEngine.CoreModule.dll</HintPath>
+		</Reference>
+		<Reference Include="UnityEngine.ImageConversionModule">
+			<HintPath>$(Il2CppAssembliesPath)\UnityEngine.ImageConversionModule.dll</HintPath>
+		</Reference>
+		<Reference Include="UnityEngine.UI">
+			<HintPath>$(Il2CppAssembliesPath)\UnityEngine.UI.dll</HintPath>
+		</Reference>
+		<Reference Include="UnityEngine.UIElementsModule">
+			<HintPath>$(Il2CppAssembliesPath)\UnityEngine.UIElementsModule.dll</HintPath>
+		</Reference>
+		<Reference Include="UnityEngine.UIModule">
+			<HintPath>$(Il2CppAssembliesPath)\UnityEngine.UIModule.dll</HintPath>
+		</Reference>
+		<Reference Include="UnityEngine.TextRenderingModule">
+			<HintPath>$(Il2CppAssembliesPath)\UnityEngine.TextRenderingModule.dll</HintPath>
+		</Reference>
+		<Reference Include="Unity.TextMeshPro">
+			<HintPath>$(Il2CppAssembliesPath)\Unity.TextMeshPro.dll</HintPath>
+		</Reference>
+		<Reference Include="Il2Cppcom.rlabrecque.steamworks.net">
+			<HintPath>$(Il2CppAssembliesPath)\Il2Cppcom.rlabrecque.steamworks.net.dll</HintPath>
+		</Reference>
+		<Reference Include="Il2CppFishNet.Runtime">
+			<HintPath>$(Il2CppAssembliesPath)\Il2CppFishNet.Runtime.dll</HintPath>
+		</Reference>
+		<Reference Include="Il2Cppmscorlib">
+			<HintPath>$(Il2CppAssembliesPath)\Il2Cppmscorlib.dll</HintPath>
+		</Reference>
+		<Reference Include="Il2CppSystem">
+			<HintPath>$(Il2CppAssembliesPath)\Il2CppSystem.dll</HintPath>
+		</Reference>
+		<Reference Include="Il2CppSystem.Core">
+			<HintPath>$(Il2CppAssembliesPath)\Il2CppSystem.Core.dll</HintPath>
+		</Reference>
+		<Reference Include="Il2CppNewtonsoft.Json">
+			<HintPath>$(Il2CppAssembliesPath)\Il2CppNewtonsoft.Json.dll</HintPath>
+		</Reference>
+		<Reference Include="MelonLoader">
+			<HintPath>$(MelonLoaderNet35)\MelonLoader.dll</HintPath>
+		</Reference>
+		<Reference Include="0Harmony">
+			<HintPath>$(MelonLoaderNet35)\0Harmony.dll</HintPath>
+		</Reference>
+		<Reference Include="Il2CppInterop.Runtime">
+			<HintPath>$(MelonLoaderNet6)\Il2CppInterop.Runtime.dll</HintPath>
+		</Reference>
+	</ItemGroup>
+
+	<!-- S1API - Direct DLL reference (same version used by game) -->
+	<ItemGroup>
+		<Reference Include="S1API">
+			<HintPath>$(ModsPath)\S1API.dll</HintPath>
+		</Reference>
+	</ItemGroup>
+
+	<!-- Fail fast if paths are wrong -->
+	<Target Name="VerifyGameFiles" BeforeTargets="Build">
+		<Error Condition="!Exists('$(Il2CppAssembliesPath)\UnityEngine.CoreModule.dll')"
+			   Text="UnityEngine.CoreModule.dll not found at '$(Il2CppAssembliesPath)'. Check GamePath." />
+		<Error Condition="!Exists('$(MelonLoaderNet35)\MelonLoader.dll')"
+			   Text="MelonLoader.dll not found in net35. Check GamePath or MelonLoader install." />
+		<Error Condition="!Exists('$(MelonLoaderNet6)\Il2CppInterop.Runtime.dll')"
+			   Text="Il2CppInterop.Runtime.dll not found in net6. Check GamePath or MelonLoader install." />
+	</Target>
+
+	<!-- Copy ONLY what we actually need to Mods -->
+	<Target Name="CopyToMods_Whitelist" AfterTargets="Build">
+		<ItemGroup>
+			<!-- Your mod -->
+			<_Ship Include="$(TargetPath)" />
+			<!-- S1API is already in Mods folder, don't copy it -->
+			<!-- FishNet runtime (only this one Il2Cpp DLL, to satisfy S1API's probe) -->
+			<_Ship Include="$(Il2CppAssembliesPath)\Il2CppFishNet.Runtime.dll"
+				   Condition="Exists('$(Il2CppAssembliesPath)\Il2CppFishNet.Runtime.dll')" />
+		</ItemGroup>
+		<Copy SourceFiles="@(_Ship)" DestinationFolder="$(ModsPath)" SkipUnchangedFiles="true" />
+	</Target>
+
+	<!-- Relaunch the game (no file copies here) -->
+	<Target Name="RelaunchGame" AfterTargets="CopyToMods_Whitelist">
+		<Exec Command="(tasklist | findstr /I &quot;Schedule.*I.exe&quot; &gt;nul &amp;&amp; taskkill /F /IM &quot;Schedule I.exe&quot; &amp;&amp; timeout /t 3 /nobreak &gt;nul) || echo Game not running&#x0D;&#x0A;START &quot;&quot; &quot;$(GamePath)\Schedule I.exe&quot;" />
+	</Target>
+</Project>

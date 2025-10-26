@@ -1,0 +1,256 @@
+// Entry point and mod state manager
+using System;
+using MelonLoader;
+using S1API;
+using S1API.Leveling;
+using S1API.Property;
+using S1API.GameTime;
+using S1API.PhoneApp;
+using S1API.PhoneCalls;
+using S1API.Internal.Abstraction;
+using S1DockExports.Services;
+using UnityEngine;
+
+[assembly: MelonInfo(typeof(S1DockExports.DockExportsMod), "S1DockExports", "1.0.0", "KaisoXP")]
+[assembly: MelonGame("TVGS", "Schedule I")]
+
+namespace S1DockExports
+{
+    public class DockExportsMod : MelonMod
+    {
+        public static DockExportsMod? Instance { get; private set; }
+
+        private bool brokerUnlocked = false;
+        private DockExportsApp? _phoneApp;
+
+        public override void OnInitializeMelon()
+        {
+            Instance = this;
+            MelonLogger.Msg("[DockExports] Mod initialized");
+
+            // ShipmentManager (Saveable) is auto-discovered by S1API v2.4.2+
+            // No manual registration needed
+        }
+
+        public override void OnSceneWasInitialized(int buildIndex, string sceneName)
+        {
+            // Clear shipment data when returning to menu to prevent cross-save contamination
+            if (sceneName == "Menu")
+            {
+                ShipmentManager.Instance.ClearAllData();
+                brokerUnlocked = false;
+            }
+        }
+
+        public override void OnSceneWasUnloaded(int buildIndex, string sceneName)
+        {
+            // Additional cleanup when leaving menu
+            if (sceneName == "Menu")
+            {
+                ShipmentManager.Instance.ClearAllData();
+                brokerUnlocked = false;
+            }
+        }
+
+        public override void OnUpdate()
+        {
+            // Check unlock conditions
+            if (!brokerUnlocked && CanUnlock())
+            {
+                UnlockBroker();
+            }
+
+            // Process Friday consignment payouts
+            if (brokerUnlocked && IsFriday() && ShouldProcessPayout())
+            {
+                ProcessConsignmentWeek();
+            }
+        }
+
+        private bool CanUnlock()
+        {
+            // Check rank requirement (Hustler = rank index 3, but we need Hustler III which might be higher)
+            // Using enum comparison as per documentation
+            if (LevelManager.Rank < Rank.Hustler)
+                return false;
+
+            // Check property ownership using PropertyManager
+            var docksProperty = PropertyManager.FindPropertyByName(DockExportsConfig.DOCKS_PROPERTY_ID);
+            return docksProperty?.IsOwned ?? false;
+        }
+
+        private bool IsFriday() => TimeManager.CurrentDay == Day.Friday;
+
+        private bool ShouldProcessPayout()
+        {
+            // Only process once per day using elapsed days tracking
+            int currentDay = TimeManager.ElapsedDays;
+            if (currentDay == ShipmentManager.Instance.LastProcessedDay)
+                return false;
+
+            // Check if there's an active consignment shipment
+            var active = ShipmentManager.Instance.ActiveShipment;
+            return active.HasValue && active.Value.Type == ShipmentType.Consignment;
+        }
+
+        private void UnlockBroker()
+        {
+            brokerUnlocked = true;
+
+            // Send broker intro message via phone call
+            SendBrokerMessage(BrokerMessages.INTRO_SMS);
+
+            // Create phone app instance (auto-discovered by S1API)
+            _phoneApp = new DockExportsApp(this);
+        }
+
+        private void SendBrokerMessage(string message)
+        {
+            // Create a simple phone call for SMS-like messages
+            // Note: PhoneCalls.SendSMS() is not documented; using PhoneCallDefinition approach
+            try
+            {
+                var call = new BrokerPhoneCall(message);
+                CallManager.QueueCall(call);
+            }
+            catch (Exception ex)
+            {
+                MelonLogger.Warning($"[DockExports] Failed to send broker message: {ex.Message}");
+                // Fallback: If the PhoneCall approach doesn't work, we may need a different API
+            }
+        }
+
+        #region Consignment Processing
+
+        private void ProcessConsignmentWeek()
+        {
+            int actualPayout = ShipmentManager.Instance.ProcessConsignmentPayment(out int lossPercent);
+            int currentDay = TimeManager.ElapsedDays;
+
+            // Record that we've processed this day
+            ShipmentManager.Instance.LastProcessedDay = currentDay;
+
+            // Add money to player
+            // Note: Money.AddMoney() is not documented; may need to use CashInstance approach
+            AddMoneyToPlayer(actualPayout);
+
+            // Send broker notification
+            int weekNumber = ShipmentManager.Instance.ActiveShipment?.PaymentsMade ?? 0;
+            int expectedPayout = (ShipmentManager.Instance.ActiveShipment?.TotalValue ?? 0) / DockExportsConfig.CONSIGNMENT_INSTALLMENTS;
+
+            string message = lossPercent > 0
+                ? BrokerMessages.GetRandomLossMessage(weekNumber, lossPercent, actualPayout, expectedPayout)
+                : BrokerMessages.WeekCleared(weekNumber, actualPayout);
+
+            SendBrokerMessage(message);
+
+            // Request game save
+            Saveable.RequestGameSave(true);
+        }
+
+        private void AddMoneyToPlayer(int amount)
+        {
+            // Try the documented CashInstance approach
+            try
+            {
+                var cashDef = (S1API.Money.CashDefinition)S1API.Items.ItemManager.GetItemDefinition("cash");
+                if (cashDef != null)
+                {
+                    var cashInstance = (S1API.Money.CashInstance)cashDef.CreateInstance();
+                    cashInstance.AddQuantity(amount);
+                }
+                else
+                {
+                    MelonLogger.Warning("[DockExports] Could not get cash definition for money add");
+                }
+            }
+            catch (Exception ex)
+            {
+                MelonLogger.Error($"[DockExports] Failed to add money: {ex.Message}");
+            }
+        }
+
+        #endregion
+
+        #region Public API for DockExportsApp
+
+        /// <summary>
+        /// Debug method to create a wholesale shipment
+        /// </summary>
+        public void DebugCreateWholesale(int quantity)
+        {
+            if (quantity > DockExportsConfig.WHOLESALE_CAP)
+            {
+                MelonLogger.Warning($"[DockExports] Wholesale quantity {quantity} exceeds cap of {DockExportsConfig.WHOLESALE_CAP}");
+                quantity = DockExportsConfig.WHOLESALE_CAP;
+            }
+
+            int brickPrice = PriceHelper.GetCurrentBrickPrice();
+            ShipmentManager.Instance.CreateWholesaleShipment(quantity, brickPrice);
+            ShipmentManager.Instance.ProcessWholesalePayment(TimeManager.ElapsedDays);
+
+            int totalPaid = ShipmentManager.Instance.ActiveShipment?.TotalPaid ?? 0;
+            AddMoneyToPlayer(totalPaid);
+
+            SendBrokerMessage(BrokerMessages.WholesaleConfirmed(quantity, totalPaid));
+            Saveable.RequestGameSave(true);
+        }
+
+        /// <summary>
+        /// Debug method to create a consignment shipment
+        /// </summary>
+        public void DebugCreateConsignment(int quantity)
+        {
+            if (quantity > DockExportsConfig.CONSIGNMENT_CAP)
+            {
+                MelonLogger.Warning($"[DockExports] Consignment quantity {quantity} exceeds cap of {DockExportsConfig.CONSIGNMENT_CAP}");
+                quantity = DockExportsConfig.CONSIGNMENT_CAP;
+            }
+
+            int brickPrice = PriceHelper.GetCurrentBrickPrice();
+            ShipmentManager.Instance.CreateConsignmentShipment(quantity, brickPrice, DockExportsConfig.CONSIGNMENT_MULTIPLIER);
+
+            var shipment = ShipmentManager.Instance.ActiveShipment;
+            if (shipment.HasValue)
+            {
+                SendBrokerMessage(BrokerMessages.ConsignmentLocked(
+                    shipment.Value.Quantity,
+                    shipment.Value.UnitPrice,
+                    shipment.Value.TotalValue
+                ));
+            }
+
+            Saveable.RequestGameSave(true);
+        }
+
+        /// <summary>
+        /// Gets the active shipment for UI display
+        /// </summary>
+        public ShipmentData? Active => ShipmentManager.Instance.ActiveShipment;
+
+        /// <summary>
+        /// Gets the shipment history for UI display
+        /// </summary>
+        public System.Collections.Generic.IReadOnlyList<ShipmentHistoryEntry> History => ShipmentManager.Instance.History;
+
+        #endregion
+
+        public override void OnApplicationQuit()
+        {
+            Instance = null;
+        }
+    }
+
+    /// <summary>
+    /// Simple phone call for broker messages
+    /// </summary>
+    public class BrokerPhoneCall : PhoneCallDefinition
+    {
+        public BrokerPhoneCall(string message) : base("The Broker", null)
+        {
+            var stage = AddStage(message);
+            stage.AddSystemTrigger(S1API.PhoneCalls.Constants.SystemTriggerType.StartTrigger);
+            Completed();
+        }
+    }
+}
