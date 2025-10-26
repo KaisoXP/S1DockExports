@@ -36,6 +36,7 @@
 **Modding** = **Mod**ifying a game to add features, change behavior, or fix issues.
 
 Think of a game like a house:
+
 - The **game developers** built the house
 - You (the **modder**) are adding new rooms, changing the wallpaper, or installing smart lighting
 - The **game engine** (Unity) is like the house's foundation and structure
@@ -44,6 +45,7 @@ Think of a game like a house:
 ### Why Mod?
 
 People mod games to:
+
 - **Add features** they wish existed (like our Dock Exports system)
 - **Fix bugs** or improve quality of life
 - **Extend gameplay** with new content
@@ -53,6 +55,7 @@ People mod games to:
 ### What Makes "Schedule I" Moddable?
 
 "Schedule I" uses:
+
 - **Unity** game engine (very common, well-understood)
 - **Il2Cpp** compilation (converts C# to C++ for performance)
 - **MelonLoader** (allows loading external code into the game)
@@ -101,6 +104,7 @@ The game is a fully functional restaurant kitchen. You can't go in and rearrange
 **Analogy:** The building's infrastructure (plumbing, electrical, HVAC).
 
 Unity provides:
+
 - **GameObjects** (the "objects" in the game world)
 - **Components** (behaviors attached to objects)
 - **Scenes** (different areas/levels)
@@ -114,6 +118,7 @@ You use Unity's systems even though you're not Unity developers - just like you 
 **Analogy:** A translator between two languages.
 
 Unity games are written in C#, but Il2Cpp converts them to C++ for better performance. This creates a **bridge** between:
+
 - **Managed world** (your C# mod code)
 - **Unmanaged world** (the game's C++ code)
 
@@ -124,6 +129,7 @@ Sometimes you need special code to cross this bridge (like converting arrays).
 **Analogy:** A backstage pass to the restaurant kitchen.
 
 MelonLoader is a framework that:
+
 - Launches the game with modifications
 - Loads your mod DLLs into the game's memory
 - Provides a console for log messages
@@ -140,6 +146,7 @@ Harmony is a library that **patches methods at runtime**. It's like saying:
 > "When the game tries to call function `OpenPhone()`, run my custom code first/after/instead."
 
 This lets you:
+
 - Hook into game events
 - Modify behavior without changing game files
 - Add new functionality to existing systems
@@ -149,6 +156,7 @@ This lets you:
 **Analogy:** A convenience toolkit.
 
 S1API is a helper library created by the modding community that provides:
+
 - Easy access to game systems (time, money, properties)
 - UI building helpers
 - Save system abstractions
@@ -161,6 +169,7 @@ S1API is a helper library created by the modding community that provides:
 **Analogy:** Your custom recipes and additions to the restaurant.
 
 This is your C# code that:
+
 - Uses all the layers below
 - Adds new features (like Dock Exports)
 - Responds to game events
@@ -177,6 +186,7 @@ Let's trace what happens from launching the game to your mod running:
 ![sequence Diagram Click "Play Schedule I](https://github.com/KaisoXP/S1DockExports/blob/main/Tutorials/MODDING_TUTORIAL_1.png "sequence Diagram Click "Play Schedule I")
 
 **Key takeaways:**
+
 1. MelonLoader runs **before** the game fully starts
 2. Your mod initializes **during** game startup
 3. Harmony patches are applied **before** game code runs
@@ -188,18 +198,21 @@ While the game is running:
 
 ![Game Flow Chart](https://github.com/KaisoXP/S1DockExports/blob/main/Tutorials/MODDING_TUTORIAL_2.png "Game Flow Chart")
 
-Your mod is **always running in the background**, checking conditions and responding to events.
+Your mod is **always running in the background**, checking conditions and responding to events.  
+**NOTICE:** This workflow is incorrect and expensive and redone in [Optimized_Architecture_CSharp_Guide](https://github.com/KaisoXP/S1DockExports/blob/main/Tutorials/Optimized_Architecture_CSharp_Guide.md)
 
 ### Harmony Patches: Code Interception
 
 Here's how Harmony patches work:
 
 **Without Harmony:**
+
 ```
 Player clicks icon → Game's OpenApp() runs → App opens
 ```
 
 **With Harmony patch:**
+
 ```
 Player clicks icon
   ↓
@@ -229,20 +242,24 @@ When you mod a **closed-source game** (no source code access), you become a **sc
 ### Example: Finding Phone App Icons
 
 **1. Observe:**
+
 - The game has a phone with app icons
 - Icons appear when you open the phone
 - Icons are clickable
 
 **2. Hypothesis:**
+
 - "Icons must be GameObjects in the scene"
 - "They're probably children of some parent container"
 
 **3. Experiment Design:**
+
 - Patch the phone's initialization method
 - Log all GameObjects in the scene hierarchy
 - Look for containers with multiple children
 
 **4. Write Code:**
+
 ```csharp
 [HarmonyPatch(typeof(HomeScreen), "Start")]
 [HarmonyPostfix]
@@ -262,6 +279,7 @@ public static void ExploreHomeScreen(HomeScreen __instance)
 ```
 
 **5. Run & Read Logs:**
+
 ```
 [DockExports] 📱 Exploring HomeScreen...
 [DockExports] HomeScreen has 5 children:
@@ -271,10 +289,12 @@ public static void ExploreHomeScreen(HomeScreen __instance)
 ```
 
 **6. Analyze:**
+
 - "Grid" has 7 children (matches the 7 apps!)
 - This is probably the icon container
 
 **7. Success!**
+
 - Hypothesis confirmed
 - Document the finding
 - Use this knowledge to inject our custom icon
@@ -297,14 +317,17 @@ public static void ExploreHomeScreen(HomeScreen __instance)
 ### Required Software
 
 1. **Visual Studio Code** or **Visual Studio 2022**
+
    - IDE for writing C# code
    - Free: https://code.visualstudio.com/
 
 2. **.NET SDK 7.0+**
+
    - Required to compile C# projects
    - Free: https://dotnet.microsoft.com/download
 
 3. **MelonLoader**
+
    - Install into your game directory
    - Instructions: https://melonwiki.xyz/#/
 
@@ -314,12 +337,14 @@ public static void ExploreHomeScreen(HomeScreen __instance)
 ### Project Setup
 
 1. **Clone or create a mod template:**
+
 ```bash
 git clone https://github.com/KaisoXP/S1DockExports.git
 cd S1DockExports
 ```
 
 2. **Set your game path** (if not default location):
+
 ```bash
 # Windows PowerShell
 $env:S1_GAME="D:\SteamLibrary\steamapps\common\Schedule I"
@@ -329,11 +354,13 @@ $env:S1_GAME="D:\SteamLibrary\steamapps\common\Schedule I"
 ```
 
 3. **Build the project:**
+
 ```bash
 dotnet build -c Il2cpp
 ```
 
 4. **Verify build output:**
+
 ```
 C:\Program Files (x86)\Steam\steamapps\common\Schedule I\
     Mods\
@@ -343,6 +370,7 @@ C:\Program Files (x86)\Steam\steamapps\common\Schedule I\
 ```
 
 5. **Launch the game:**
+
 - A console window should open (MelonLoader)
 - Check for `[DockExports] Mod initialized` in the logs
 
@@ -413,6 +441,7 @@ Press **F5** in-game:
 ```
 
 **Congratulations!** You just:
+
 - Created a mod from scratch
 - Detected game initialization
 - Responded to player input
@@ -431,9 +460,11 @@ Your mod has several "lifecycle methods" that MelonLoader calls at specific time
 ### Key Methods Explained
 
 #### `OnApplicationStart()`
+
 **When:** Very first thing, before game fully initializes
 **Use for:** One-time setup that doesn't depend on game state
 **Example:**
+
 ```csharp
 public override void OnApplicationStart()
 {
@@ -443,9 +474,11 @@ public override void OnApplicationStart()
 ```
 
 #### `OnInitializeMelon()`
+
 **When:** After `OnApplicationStart()`, when your mod is fully loaded
 **Use for:** Main initialization logic
 **Example:**
+
 ```csharp
 public override void OnInitializeMelon()
 {
@@ -458,9 +491,11 @@ public override void OnInitializeMelon()
 ```
 
 #### `OnSceneWasInitialized(string sceneName)`
+
 **When:** A new scene is about to be loaded
 **Use for:** Preparing for scene load, clearing data
 **Example:**
+
 ```csharp
 public override void OnSceneWasInitialized(int buildIndex, string sceneName)
 {
@@ -475,9 +510,11 @@ public override void OnSceneWasInitialized(int buildIndex, string sceneName)
 ```
 
 #### `OnSceneWasLoaded(string sceneName)`
+
 **When:** A new scene has fully loaded
 **Use for:** Accessing scene GameObjects, injecting UI
 **Example:**
+
 ```csharp
 public override void OnSceneWasLoaded(int buildIndex, string sceneName)
 {
@@ -492,10 +529,12 @@ public override void OnSceneWasLoaded(int buildIndex, string sceneName)
 ```
 
 #### `OnUpdate()`
+
 **When:** Every frame (60 times per second)
 **Use for:** Checking conditions, polling state
 **⚠️ WARNING:** Runs very frequently! Use throttling!
 **Example:**
+
 ```csharp
 private float lastCheck = 0f;
 
@@ -511,9 +550,11 @@ public override void OnUpdate()
 ```
 
 #### `OnLateUpdate()`
+
 **When:** After all `OnUpdate()` calls finish
 **Use for:** Operations that need to run after game logic updates
 **Example:**
+
 ```csharp
 public override void OnLateUpdate()
 {
@@ -523,9 +564,11 @@ public override void OnLateUpdate()
 ```
 
 #### `OnFixedUpdate()`
+
 **When:** Fixed time intervals (default: 50 times per second)
 **Use for:** Physics-related code (rare in UI mods)
 **Example:**
+
 ```csharp
 public override void OnFixedUpdate()
 {
@@ -534,9 +577,11 @@ public override void OnFixedUpdate()
 ```
 
 #### `OnApplicationQuit()`
+
 **When:** Game is closing
 **Use for:** Cleanup, final saves
 **Example:**
+
 ```csharp
 public override void OnApplicationQuit()
 {
@@ -559,11 +604,13 @@ Harmony is your **secret weapon** for modding. It lets you hook into the game's 
 Runs **before** the game's method.
 
 **Use cases:**
+
 - Prevent a method from running
 - Modify method parameters
 - Run setup code
 
 **Example:**
+
 ```csharp
 [HarmonyPatch(typeof(Phone), "Open")]
 [HarmonyPrefix]
@@ -578,6 +625,7 @@ public static bool BeforePhoneOpens(Phone __instance)
 ```
 
 **Diagram:**
+
 ```
 Player clicks phone icon
   ↓
@@ -593,11 +641,13 @@ Phone opens
 Runs **after** the game's method.
 
 **Use cases:**
+
 - React to method completion
 - Modify return values
 - Log results
 
 **Example:**
+
 ```csharp
 [HarmonyPatch(typeof(Phone), "Open")]
 [HarmonyPostfix]
@@ -609,6 +659,7 @@ public static void AfterPhoneOpens(Phone __instance)
 ```
 
 **Diagram:**
+
 ```
 Player clicks phone icon
   ↓
@@ -624,6 +675,7 @@ Phone opens with your additions
 **Advanced:** Modifies the **IL code** (instructions) of the method.
 
 **Use cases:**
+
 - Change method logic internally
 - Very advanced, rarely needed
 
@@ -658,6 +710,7 @@ public static class PhoneAppInjector
 ```
 
 **Breakdown:**
+
 1. `[HarmonyPatch]` - Marks the class as containing patches
 2. `[HarmonyPatch(typeof(HomeScreen), "Start")]` - Target `HomeScreen.Start()` method
 3. `[HarmonyPostfix]` - Run **after** `Start()` completes
@@ -667,14 +720,15 @@ public static class PhoneAppInjector
 
 Harmony uses **special parameter names** to pass you information:
 
-| Parameter | What It Is |
-|-----------|------------|
-| `__instance` | The object the method was called on (`this`) |
-| `__result` | The return value (for Postfix patches) |
-| `__0`, `__1`, `__2`, ... | Method parameters by index |
-| Any other name | Match method parameter names exactly |
+| Parameter                | What It Is                                   |
+| ------------------------ | -------------------------------------------- |
+| `__instance`             | The object the method was called on (`this`) |
+| `__result`               | The return value (for Postfix patches)       |
+| `__0`, `__1`, `__2`, ... | Method parameters by index                   |
+| Any other name           | Match method parameter names exactly         |
 
 **Example:**
+
 ```csharp
 // Game has: public void ProcessPayment(int amount, string reason)
 
@@ -695,11 +749,13 @@ public static void BeforePayment(
 **How do you know what methods exist if the game is closed-source?**
 
 1. **Use dnSpy or ILSpy** (decompilers)
+
    - Open `Assembly-CSharp.dll` from game directory
    - Browse classes and methods
    - See method signatures
 
 2. **Look at S1API source code**
+
    - It already figured out many useful methods
 
 3. **Experiment with logging**
@@ -707,6 +763,7 @@ public static void BeforePayment(
    - Log all method calls in that class
 
 **Example exploration:**
+
 ```csharp
 [HarmonyPatch(typeof(HomeScreen), "Start")]
 [HarmonyPostfix]
@@ -837,15 +894,15 @@ foreach (var comp in allComponents)
 
 ### Common Unity Components
 
-| Component | Purpose | Common Operations |
-|-----------|---------|-------------------|
-| `Transform` | Position, rotation, scale | `transform.position`, `GetChild()`, `SetParent()` |
-| `RectTransform` | UI positioning | `anchorMin`, `anchorMax`, `sizeDelta` |
-| `Image` | Display sprites | `sprite`, `color` |
-| `Text` | Display text | `text`, `fontSize`, `color` |
-| `Button` | Clickable UI | `onClick.AddListener()` |
-| `ScrollRect` | Scrollable area | `verticalScrollbar`, `content` |
-| `Canvas` | UI rendering root | `renderMode` |
+| Component       | Purpose                   | Common Operations                                 |
+| --------------- | ------------------------- | ------------------------------------------------- |
+| `Transform`     | Position, rotation, scale | `transform.position`, `GetChild()`, `SetParent()` |
+| `RectTransform` | UI positioning            | `anchorMin`, `anchorMax`, `sizeDelta`             |
+| `Image`         | Display sprites           | `sprite`, `color`                                 |
+| `Text`          | Display text              | `text`, `fontSize`, `color`                       |
+| `Button`        | Clickable UI              | `onClick.AddListener()`                           |
+| `ScrollRect`    | Scrollable area           | `verticalScrollbar`, `content`                    |
+| `Canvas`        | UI rendering root         | `renderMode`                                      |
 
 ### Creating New GameObjects
 
@@ -893,6 +950,7 @@ image.sprite = myCustomSprite;
 ```
 
 **Why clone?**
+
 - Keeps the same structure
 - Inherits all components
 - Already properly configured
@@ -903,6 +961,7 @@ image.sprite = myCustomSprite;
 ## Save Systems and Persistence
 
 Your mod needs to **remember data** across:
+
 - Game restarts
 - Save/load
 - Scene changes
@@ -912,6 +971,7 @@ Your mod needs to **remember data** across:
 S1API provides a `Saveable` base class that handles saving/loading automatically.
 
 **How it works:**
+
 1. Extend `Saveable` class
 2. Mark fields with `[SaveableField]` attribute
 3. S1API automatically serializes them to JSON
@@ -977,17 +1037,20 @@ public class ShipmentManager : Saveable
 Use **simple, serializable types**:
 
 ✅ **Works:**
+
 - Primitives: `int`, `float`, `bool`, `string`
 - Structs with simple fields
 - Lists and arrays of simple types
 - Nullable types: `int?`, `ShipmentData?`
 
 ❌ **Doesn't Work:**
+
 - Unity types: `GameObject`, `Transform`, `Sprite`
 - Complex classes with circular references
 - Delegates/events
 
 **Example struct:**
+
 ```csharp
 [Serializable]  // Required for JSON serialization
 public struct ShipmentData
@@ -1014,6 +1077,7 @@ Saveable.RequestGameSave(immediate: true);
 ```
 
 **When to save:**
+
 - After creating a shipment
 - After processing a payment
 - After unlocking a feature
@@ -1049,6 +1113,7 @@ Let's walk through building a complete feature **from scratch**: detecting when 
 **Feature:** Every in-game Friday, process a consignment payment with a chance of loss.
 
 **Requirements:**
+
 - Detect when it's Friday
 - Only process once per Friday (not 60 times per second!)
 - Roll for loss (25% chance)
@@ -1059,11 +1124,13 @@ Let's walk through building a complete feature **from scratch**: detecting when 
 ### Step 2: Research (The Scientific Method)
 
 **What we need to find:**
+
 1. How to detect the current day of the week
 2. How to add money to the player
 3. How to send messages
 
 **Research approach:**
+
 ```csharp
 // Experiment 1: Find the TimeManager
 [HarmonyPatch(typeof(TimeManager), "Awake")]
@@ -1240,6 +1307,7 @@ public class DockExportsMod : MelonMod
 ### Step 5: Test
 
 **Test cases:**
+
 1. ✅ Non-Friday: Log should show checks but no processing
 2. ✅ Friday with no active shipment: No processing
 3. ✅ Friday with active consignment: Process payment
@@ -1247,6 +1315,7 @@ public class DockExportsMod : MelonMod
 5. ✅ Next Friday: Should process again
 
 **Test logs:**
+
 ```
 [10:15:30.123] [DockExports] 📅 Current day: 0 (Monday), not Friday
 [10:15:31.456] [DockExports] 📅 Current day: 1 (Tuesday), not Friday
@@ -1268,6 +1337,7 @@ public class DockExportsMod : MelonMod
 ### Step 6: Refine
 
 Based on testing, we might add:
+
 - Better error handling
 - Visual feedback (UI notification)
 - Sound effects
@@ -1429,15 +1499,18 @@ public void RiskyOperation()
 #### Issue: Mod Doesn't Load
 
 **Symptoms:**
+
 - No `[YourMod]` messages in console
 - MelonLoader doesn't mention your mod
 
 **Causes:**
+
 1. DLL not in `Mods/` folder
 2. Wrong MelonInfo attribute
 3. Build failed
 
 **Solution:**
+
 ```bash
 # Check build output
 dotnet build -c Il2cpp
@@ -1452,6 +1525,7 @@ type "C:\Program Files (x86)\Steam\steamapps\common\Schedule I\MelonLoader\Lates
 #### Issue: NullReferenceException
 
 **Symptoms:**
+
 ```
 NullReferenceException: Object reference not set to an instance of an object
 ```
@@ -1459,6 +1533,7 @@ NullReferenceException: Object reference not set to an instance of an object
 **Cause:** Trying to use an object that doesn't exist.
 
 **Solution:** Check for null before using:
+
 ```csharp
 // Bad
 var timeManager = NetworkSingleton<TimeManager>.Instance;
@@ -1479,6 +1554,7 @@ else
 #### Issue: TypeLoadException
 
 **Symptoms:**
+
 ```
 TypeLoadException: Could not load type 'SomeType' from assembly 'Assembly-CSharp'
 ```
@@ -1486,6 +1562,7 @@ TypeLoadException: Could not load type 'SomeType' from assembly 'Assembly-CSharp
 **Cause:** Missing assembly reference or wrong build configuration.
 
 **Solution:**
+
 1. Make sure you're building with `Il2cpp` configuration (not CrossCompat)
 2. Add required DLL reference to `.csproj`
 
@@ -1500,15 +1577,18 @@ TypeLoadException: Could not load type 'SomeType' from assembly 'Assembly-CSharp
 #### Issue: Harmony Patch Not Running
 
 **Symptoms:**
+
 - Logs before patch appear
 - Logs inside patch method don't appear
 
 **Causes:**
+
 1. Wrong class/method name in `[HarmonyPatch]`
 2. Wrong parameter types
 3. Method doesn't exist in game
 
 **Solution:**
+
 ```csharp
 // Add logging to verify patch application
 [HarmonyPatch(typeof(HomeScreen), "Start")]
@@ -1523,6 +1603,7 @@ public static void MyPatch(HomeScreen __instance)
 ```
 
 If you never see "✅ PATCH EXECUTED", the patch isn't being applied. Check:
+
 - Class name spelling: `typeof(HomeScreen)` must match exactly
 - Method name spelling: `"Start"` must match exactly (case-sensitive)
 - Use dnSpy/ILSpy to verify method exists
@@ -1534,10 +1615,12 @@ If you never see "✅ PATCH EXECUTED", the patch isn't being applied. Check:
 ### Do's ✅
 
 1. **Log extensively during development**
+
    - You can always remove logs later
    - Future You will thank Past You
 
 2. **Use constants for magic numbers**
+
    ```csharp
    // Bad
    if (rank >= 3)  // What is 3?
@@ -1548,6 +1631,7 @@ If you never see "✅ PATCH EXECUTED", the patch isn't being applied. Check:
    ```
 
 3. **Check for null before using objects**
+
    ```csharp
    if (instance != null)
    {
@@ -1556,6 +1640,7 @@ If you never see "✅ PATCH EXECUTED", the patch isn't being applied. Check:
    ```
 
 4. **Throttle high-frequency operations**
+
    ```csharp
    private float lastCheck = 0f;
 
@@ -1570,6 +1655,7 @@ If you never see "✅ PATCH EXECUTED", the patch isn't being applied. Check:
    ```
 
 5. **Unsubscribe from events**
+
    ```csharp
    protected override void OnDestroyed()
    {
@@ -1578,6 +1664,7 @@ If you never see "✅ PATCH EXECUTED", the patch isn't being applied. Check:
    ```
 
 6. **Use meaningful names**
+
    ```csharp
    // Bad
    int x = GetData();
@@ -1589,6 +1676,7 @@ If you never see "✅ PATCH EXECUTED", the patch isn't being applied. Check:
 ### Don'ts ❌
 
 1. **Don't log every frame without throttling**
+
    ```csharp
    // This creates 3,600 logs per minute!
    public override void OnUpdate()
@@ -1598,6 +1686,7 @@ If you never see "✅ PATCH EXECUTED", the patch isn't being applied. Check:
    ```
 
 2. **Don't ignore exceptions**
+
    ```csharp
    try
    {
@@ -1610,10 +1699,12 @@ If you never see "✅ PATCH EXECUTED", the patch isn't being applied. Check:
    ```
 
 3. **Don't modify game files**
+
    - Use Harmony patches instead
    - Game updates will break your changes
 
 4. **Don't trust data without validation**
+
    ```csharp
    // Bad
    int quantity = userInput;
@@ -1625,6 +1716,7 @@ If you never see "✅ PATCH EXECUTED", the patch isn't being applied. Check:
    ```
 
 5. **Don't hardcode paths**
+
    ```csharp
    // Bad
    string path = "C:\\Program Files\\...\\Mods\\";
@@ -1643,11 +1735,13 @@ If you never see "✅ PATCH EXECUTED", the patch isn't being applied. Check:
 Now that you understand the fundamentals:
 
 1. **Study existing mods**
+
    - S1NotesApp (reference implementation)
    - S1FuelMod (direct game access patterns)
    - S1API source code (framework understanding)
 
 2. **Experiment with features**
+
    - Add a new phone app
    - Create a time-based system
    - Implement a notification system
@@ -1662,17 +1756,20 @@ Now that you understand the fundamentals:
 ### Resources
 
 **Documentation:**
+
 - [LOGGING_GUIDE.md](./LOGGING_GUIDE.md) - Master logging for debugging
 - [ICON_LOADING_TUTORIAL.md](./ICON_LOADING_TUTORIAL.md) - Embedded resource images
 - [PROJECT_STRUCTURE.md](./PROJECT_STRUCTURE.md) - Code organization
 - [CSPROJ_EXPLAINED.md](./CSPROJ_EXPLAINED.md) - Build system deep dive
 
 **External:**
+
 - [MelonLoader Wiki](https://melonwiki.xyz/) - Official MelonLoader docs
 - [Harmony Documentation](https://harmony.pardeike.net/) - Patching guide
 - [Unity Scripting API](https://docs.unity3d.com/ScriptReference/) - Unity classes reference
 
 **Tools:**
+
 - [dnSpy](https://github.com/dnSpy/dnSpy) - .NET decompiler (explore game code)
 - [ILSpy](https://github.com/icsharpcode/ILSpy) - Alternative decompiler
 - [Visual Studio Code](https://code.visualstudio.com/) - Lightweight code editor
@@ -1688,11 +1785,13 @@ Now that you understand the fundamentals:
 ## Final Thoughts
 
 **Modding is equal parts:**
+
 - 🔬 **Science** (experimenting and discovering)
 - 🎨 **Art** (designing features players will enjoy)
 - 🛠️ **Engineering** (building robust, maintainable code)
 
 You now have the foundation to:
+
 - ✅ Understand how mods load and execute
 - ✅ Use Harmony to patch game code
 - ✅ Work with Unity GameObjects and components
