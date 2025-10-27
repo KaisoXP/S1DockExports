@@ -257,5 +257,65 @@ The floor would only trigger if future tuning reduced totals below below Wholesa
 This mod is both a gameplay system and a learning tool. It demonstrates how risk mechanics, probability, and narrative design can coexist naturally inside a Unity-based sandbox world while allowing me to grow as a game developer.
 
 ---
+# 📊 Detailed Project Timeline
+
+**Start Date:** Monday, October 27, 2025  
+**Daily Commitment:** 2-3 hours (realistic) or 4-5 hours (intensive)  
+_Fluctuations due to normal IRL interruptions from time to time_
+
+---
+
+## 🗓️ Week-by-Week Schedule
+
+| Week | Dates | Focus Area | Hours | Daily Tasks | Deliverable |
+|------|-------|------------|-------|-------------|-------------|
+| **Week 1** | Oct 27 - Nov 2 | Programming Basics + C# Fundamentals | 12-15h | Mon-Wed: C# basics (variables, loops, methods)<br>Thu-Fri: OOP concepts<br>Weekend: Practice exercises | Solid C# foundation |
+| **Week 2** | Nov 3 - Nov 9 | Unity Basics + BepInEx Setup | 13-15h | Mon-Tue: Unity interface & GameObjects<br>Wed-Thu: BepInEx installation & structure<br>Fri-Sun: First "Hello World" mod | **"Hello World" mod that loads** |
+| **Week 3** | Nov 10 - Nov 16 | Core System Analysis | 12-15h | Mon-Tue: Study unlock system code<br>Wed-Thu: Study shipment system<br>Fri-Sun: Plan implementation | Understanding of core systems |
+| **Week 4** | Nov 17 - Nov 23 | Unlock System Implementation | 13-15h | Mon-Wed: Code unlock system<br>Thu-Fri: Testing & debugging<br>Weekend: Shipment system start | **Working unlock system** |
+| **Week 5** | Nov 24 - Nov 30 | Shipment System | 15-17h | Mon-Wed: Complete shipment creation<br>Thu-Fri: Integration testing<br>Weekend: Start payout system | **Working shipment creation** |
+| **Week 6** | Dec 1 - Dec 7 | Payout System + UI Start | 15-18h | Mon-Tue: Auto-payout logic<br>Wed-Thu: Phone app UI basics<br>Fri-Sun: Connect systems | **Auto payouts working** |
+| **Week 7** | Dec 8 - Dec 14 | UI Polish + Testing | 10-12h | Mon-Wed: Polish phone app<br>Thu-Fri: Bug fixing<br>Weekend: User testing | **Complete functional mod** |
+| **Week 8** | Dec 15 - Dec 21 | Final Polish + Release | 10-13h | Mon-Tue: Final testing<br>Wed-Thu: Documentation<br>Fri: Upload to Thunderstore<br>Weekend: Monitor feedback | **🎉 PUBLIC RELEASE** |
+
+---
+
+## 📍 Key Milestones
+
+| Date | Milestone |
+|------|-----------|
+| **Nov 2** | ✅ C# basics complete |
+| **Nov 9** | ✅ First mod runs in game |
+| **Nov 23** | ✅ Unlock system functional |
+| **Nov 30** | ✅ Shipment creation works |
+| **Dec 7** | ✅ All features complete |
+| **Dec 14** | ✅ Ready for release |
+| **Dec 20** | 🚀 **MOD PUBLISHED** |
+
+---
+
+## ⚡ Intensive Schedule (4-5 weeks)
+
+If committing **4-5 hours daily**, here's the fast track:
+
+| Week | Dates | Focus | Deliverable |
+|------|-------|-------|-------------|
+| **Week 1** | Oct 27 - Nov 2 | C# + Unity + First Mod | "Hello World" mod |
+| **Week 2** | Nov 3 - Nov 9 | Unlock + Shipment Systems | Core systems working |
+| **Week 3** | Nov 10 - Nov 16 | Payouts + UI | Full feature set |
+| **Week 4** | Nov 17 - Nov 23 | Polish + Testing | Ready for release |
+| **Week 5** | Nov 24 - Nov 30 | Release Week | **🚀 Published** |
+
+**Target Release:** Late November 2025
+
+---
+
+## 📊 Total Project Summary
+
+| Schedule | Duration | Total Hours | Release Date |
+|----------|----------|-------------|--------------|
+| **Realistic** | 8 weeks | 100-120 hours | ~Dec 20, 2025 |
+| **Intensive** | 5 weeks | 100-120 hours | ~Nov 30, 2025 |
+---
 
 **Credit: Grateful thanks to [@ifBars](https://github.com/ifBars/S1APITemplate) for providing the S1API Template and Tutorial that made this project possible.**
