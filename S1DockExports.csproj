@@ -15,6 +15,7 @@
 		<Configurations>Il2cpp;CrossCompat</Configurations>
 		<AllowUnsafeBlocks>true</AllowUnsafeBlocks>
 		<EnableDefaultCompileItems>true</EnableDefaultCompileItems>
+		<DefaultItemExcludes>$(DefaultItemExcludes);Tutorials\**</DefaultItemExcludes>
 
 		<!-- Per-machine override:  $env:S1_GAME="D:\SteamLibrary\steamapps\common\Schedule I" -->
 		<GamePath Condition="'$(GamePath)'=='' and '$(S1_GAME)'!=''">$(S1_GAME)</GamePath>

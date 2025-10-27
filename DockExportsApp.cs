@@ -108,8 +108,6 @@ namespace S1DockExports
         /// Reference to the main mod instance for accessing shipment data and methods.
         /// </summary>
         private readonly DockExportsMod _mod;
-        private static DockExportsApp? _instance;
-        private GameObject? _rootContainer;
 
         /// <summary>
         /// Static singleton instance for event callbacks from outside the app.
@@ -181,7 +179,6 @@ namespace S1DockExports
         /// History tab panel GameObject (completed shipments log UI).
         /// </summary>
         private GameObject _historyPanel;
-        private GameObject _lockScreen;
 
         /// <summary>
         /// Lock screen panel GameObject (shown when broker is not unlocked).
