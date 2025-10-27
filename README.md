@@ -270,7 +270,7 @@ _Fluctuations due to normal IRL interruptions from time to time_
 | Week | Dates | Focus Area | Hours | Daily Tasks | Deliverable |
 |------|-------|------------|-------|-------------|-------------|
 | **Week 1** | Oct 27 - Nov 2 | Programming Basics + C# Fundamentals | 12-15h | Mon-Wed: C# basics (variables, loops, methods)<br>Thu-Fri: OOP concepts<br>Weekend: Practice exercises | Solid C# foundation |
-| **Week 2** | Nov 3 - Nov 9 | Unity Basics + BepInEx Setup | 13-15h | Mon-Tue: Unity interface & GameObjects<br>Wed-Thu: BepInEx installation & structure<br>Fri-Sun: First "Hello World" mod | **"Hello World" mod that loads** |
+| **Week 2** | Nov 3 - Nov 9 | Unity Basics + MelonLoader Setup | 13-15h | Mon-Tue: Unity interface & GameObjects<br>Wed-Thu: MelonLoader installation & structure<br>Fri-Sun: First "Hello World" mod | **"Hello World" mod that loads** |
 | **Week 3** | Nov 10 - Nov 16 | Core System Analysis | 12-15h | Mon-Tue: Study unlock system code<br>Wed-Thu: Study shipment system<br>Fri-Sun: Plan implementation | Understanding of core systems |
 | **Week 4** | Nov 17 - Nov 23 | Unlock System Implementation | 13-15h | Mon-Wed: Code unlock system<br>Thu-Fri: Testing & debugging<br>Weekend: Shipment system start | **Working unlock system** |
 | **Week 5** | Nov 24 - Nov 30 | Shipment System | 15-17h | Mon-Wed: Complete shipment creation<br>Thu-Fri: Integration testing<br>Weekend: Start payout system | **Working shipment creation** |
