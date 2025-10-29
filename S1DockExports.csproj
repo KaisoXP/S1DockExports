@@ -7,20 +7,28 @@
 
 
 	<PropertyGroup>
-		<TargetFramework>netstandard2.1</TargetFramework>
+		<TargetFramework>net6.0</TargetFramework>
 		<ImplicitUsings>enable</ImplicitUsings>
 		<RootNamespace>S1DockExports</RootNamespace>
 		<LangVersion>default</LangVersion>
+		<Nullable>enable</Nullable>
 		<NeutralLanguage>en-US</NeutralLanguage>
 		<Configurations>Il2cpp;CrossCompat</Configurations>
 		<AllowUnsafeBlocks>true</AllowUnsafeBlocks>
 		<EnableDefaultCompileItems>true</EnableDefaultCompileItems>
 		<DefaultItemExcludes>$(DefaultItemExcludes);Tutorials\**</DefaultItemExcludes>
-
+		<DisableImplicitNuGetFallbackFolder>true</DisableImplicitNuGetFallbackFolder>
 		<!-- Per-machine override:  $env:S1_GAME="D:\SteamLibrary\steamapps\common\Schedule I" -->
 		<GamePath Condition="'$(GamePath)'=='' and '$(S1_GAME)'!=''">$(S1_GAME)</GamePath>
-		<!-- Default path (edit if different) -->
-		<GamePath Condition="'$(GamePath)'==''">C:\Program Files (x86)\Steam\steamapps\common\Schedule I</GamePath>
+		<!-- Default path (Windows) -->
+		<GamePath Condition="'$(GamePath)'=='' and '$(OS)'=='Windows_NT'">C:\Program Files (x86)\Steam\steamapps\common\Schedule I</GamePath>
+		<!-- Default path (WSL/Linux mirror of Windows install) -->
+		<GamePath Condition="'$(GamePath)'=='' and '$(OS)'!='Windows_NT'">/mnt/c/Program Files (x86)/Steam/steamapps/common/Schedule I</GamePath>
+	</PropertyGroup>
+
+	<PropertyGroup Condition="'$(OS)'!='Windows_NT' and '$(HOME)'!=''">
+		<UserProfile Condition="'$(UserProfile)'==''">$(HOME)</UserProfile>
+		<RestorePackagesPath Condition="'$(RestorePackagesPath)'==''">$(HOME)/.nuget/packages</RestorePackagesPath>
 	</PropertyGroup>
 
 	<!-- Shared paths for IL2CPP install -->
@@ -36,6 +44,11 @@
 		<DefineConstants>CROSS_COMPAT</DefineConstants>
 		<AssemblyName>S1DockExports</AssemblyName>
 	</PropertyGroup>
+
+	<ItemGroup Condition="'$(Configuration)'=='CrossCompat'">
+		<Compile Remove="Integrations\PhoneAppInjector.cs" />
+		<Compile Remove="Integrations\GameAccessPatches.cs" />
+	</ItemGroup>
 
 	<ItemGroup Condition="'$(Configuration)'=='CrossCompat'">
 		<!-- Unity + TextMeshPro (from Il2CppAssemblies) -->
@@ -163,12 +176,9 @@
 
 	<!-- Fail fast if paths are wrong -->
 	<Target Name="VerifyGameFiles" BeforeTargets="Build">
-		<Error Condition="!Exists('$(Il2CppAssembliesPath)\UnityEngine.CoreModule.dll')"
-			   Text="UnityEngine.CoreModule.dll not found at '$(Il2CppAssembliesPath)'. Check GamePath." />
-		<Error Condition="!Exists('$(MelonLoaderNet35)\MelonLoader.dll')"
-			   Text="MelonLoader.dll not found in net35. Check GamePath or MelonLoader install." />
-		<Error Condition="!Exists('$(MelonLoaderNet6)\Il2CppInterop.Runtime.dll')"
-			   Text="Il2CppInterop.Runtime.dll not found in net6. Check GamePath or MelonLoader install." />
+		<Error Condition="!Exists('$(Il2CppAssembliesPath)\UnityEngine.CoreModule.dll')" Text="UnityEngine.CoreModule.dll not found at '$(Il2CppAssembliesPath)'. Check GamePath." />
+		<Error Condition="!Exists('$(MelonLoaderNet35)\MelonLoader.dll')" Text="MelonLoader.dll not found in net35. Check GamePath or MelonLoader install." />
+		<Error Condition="!Exists('$(MelonLoaderNet6)\Il2CppInterop.Runtime.dll')" Text="Il2CppInterop.Runtime.dll not found in net6. Check GamePath or MelonLoader install." />
 	</Target>
 
 	<!-- Copy ONLY what we actually need to Mods -->
@@ -178,14 +188,13 @@
 			<_Ship Include="$(TargetPath)" />
 			<!-- S1API is already in Mods folder, don't copy it -->
 			<!-- FishNet runtime (only this one Il2Cpp DLL, to satisfy S1API's probe) -->
-			<_Ship Include="$(Il2CppAssembliesPath)\Il2CppFishNet.Runtime.dll"
-				   Condition="Exists('$(Il2CppAssembliesPath)\Il2CppFishNet.Runtime.dll')" />
+			<_Ship Include="$(Il2CppAssembliesPath)\Il2CppFishNet.Runtime.dll" Condition="Exists('$(Il2CppAssembliesPath)\Il2CppFishNet.Runtime.dll')" />
 		</ItemGroup>
 		<Copy SourceFiles="@(_Ship)" DestinationFolder="$(ModsPath)" SkipUnchangedFiles="true" />
 	</Target>
 
 	<!-- Relaunch the game (no file copies here) -->
 	<Target Name="RelaunchGame" AfterTargets="CopyToMods_Whitelist">
-		<Exec Command="(tasklist | findstr /I &quot;Schedule.*I.exe&quot; &gt;nul &amp;&amp; taskkill /F /IM &quot;Schedule I.exe&quot; &amp;&amp; timeout /t 3 /nobreak &gt;nul) || echo Game not running&#x0D;&#x0A;START &quot;&quot; &quot;$(GamePath)\Schedule I.exe&quot;" />
+		<Exec Command="(tasklist | findstr /I &quot;Schedule.*I.exe&quot; &gt;nul &amp;&amp; taskkill /F /IM &quot;Schedule I.exe&quot; &amp;&amp; timeout /t 3 /nobreak &gt;nul) || echo Game not running&#xD;&#xA;START &quot;&quot; &quot;$(GamePath)\Schedule I.exe&quot;" />
 	</Target>
 </Project>
