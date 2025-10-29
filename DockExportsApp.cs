@@ -349,13 +349,23 @@ namespace S1DockExports
 
             if (_rootContainer != null)
             {
-                // Clear all existing UI
-                UIFactory.ClearChildren(_rootContainer.transform);
+                // Get the parent container (phone's app container) before destroying our root
+                var parentContainer = _rootContainer.transform.parent?.gameObject;
 
-                // Rebuild UI with current unlock state
-                OnCreatedUI(_rootContainer);
+                if (parentContainer != null)
+                {
+                    // Destroy the old root panel completely
+                    UnityEngine.Object.Destroy(_rootContainer);
 
-                MelonLoader.MelonLogger.Msg("[DockExports] ✓ UI rebuild complete");
+                    // Recreate UI from scratch with the parent container
+                    OnCreatedUI(parentContainer);
+
+                    MelonLoader.MelonLogger.Msg("[DockExports] ✓ UI rebuild complete");
+                }
+                else
+                {
+                    MelonLoader.MelonLogger.Warning("[DockExports] ⚠️ Cannot rebuild UI: parent container is null");
+                }
             }
             else
             {
@@ -432,14 +442,14 @@ namespace S1DockExports
         /// </remarks>
         protected override void OnCreatedUI(GameObject container)
         {
-            // Store root container for rebuilding later
-            _rootContainer = container;
-
             bool isUnlocked = _mod.BrokerUnlocked;
             MelonLoader.MelonLogger.Msg($"[DockExports] 📱 Building UI: unlocked={isUnlocked}");
 
             var root = UIFactory.Panel("DE_Root", container.transform, DockExportsConfig.Bg, fullAnchor: true);
             UIFactory.VerticalLayoutOnGO(root);
+
+            // Store OUR root panel for rebuilding later (not the shared phone container!)
+            _rootContainer = root;
 
             var header = UIFactory.Panel("DE_Header", root.transform, DockExportsConfig.Header);
             UIFactory.Text("DE_Title", "Dock Exports", header.transform, 20, TextAnchor.MiddleCenter);

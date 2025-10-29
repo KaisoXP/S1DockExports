@@ -148,14 +148,12 @@ namespace S1DockExports
         /// Called very early in the game's startup, before game systems are initialized.
         /// </summary>
         /// <remarks>
-        /// This is where you'd register phone apps or Harmony patches that need to be
-        /// active before the game loads. Currently, our phone app icon is injected via
-        /// a Harmony patch on HomeScreen.Start(), so no registration is needed here.
+        /// NuGet S1API.Forked v2.4.2 doesn't have PhoneAppManager auto-discovery.
+        /// Phone app icon is injected via Harmony patch on HomeScreen.Start().
         /// </remarks>
         public override void OnApplicationStart()
         {
-            // S1API auto-discovers PhoneApp classes from loaded assemblies
-            // Our Harmony patch will inject the icon manually and wire it to open the app
+            // Phone app icon will be injected via PhoneAppInjector Harmony patch
             MelonLogger.Msg("[DockExports] 📱 DockExportsApp ready for Harmony icon injection");
         }
 
@@ -180,7 +178,7 @@ namespace S1DockExports
         {
             MelonLogger.Msg($"[DockExports] 🗺️ Scene initialized: {sceneName} (index: {buildIndex})");
 
-            // Phone app injection happens via Harmony patch when AppsCanvas.Awake() is called
+            // Phone app injection happens via Harmony patch when HomeScreen.Start() is called
             if (sceneName == "Main")
             {
                 MelonLogger.Msg("[DockExports] 📱 Main scene loaded, phone app will inject automatically");

@@ -157,7 +157,7 @@
 	<!-- S1API - Direct DLL reference (same version used by game) -->
 	<ItemGroup>
 		<Reference Include="S1API">
-			<HintPath>$(ModsPath)\S1API.dll</HintPath>
+			<HintPath>$(ModsPath)\S1API.Il2Cpp.MelonLoader.dll</HintPath>
 		</Reference>
 	</ItemGroup>
 
