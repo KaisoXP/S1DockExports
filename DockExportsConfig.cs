@@ -20,6 +20,11 @@
 /// </para>
 /// </remarks>
 using System.Collections.Generic;
+using MelonLoader;
+#if !CROSS_COMPAT
+using S1API.Items;
+using S1API.Products;
+#endif
 
 namespace S1DockExports
 {
@@ -204,6 +209,20 @@ namespace S1DockExports
         /// </para>
         /// </remarks>
         public const int DEFAULT_BRICK_PRICE = 14700;
+
+        /// <summary>
+        /// Default item ID representing the brick product used for price lookups.
+        /// </summary>
+        public const string DEFAULT_BRICK_ITEM_ID = "cocaine_brick_8mix";
+
+        /// <summary>
+        /// List of allowed product IDs that can be staged for export.
+        /// Customize this to support additional brick definitions.
+        /// </summary>
+        public static readonly IReadOnlyList<string> ALLOWED_PRODUCT_IDS = new List<string>
+        {
+            DEFAULT_BRICK_ITEM_ID
+        };
 
         #endregion
 
@@ -568,10 +587,49 @@ namespace S1DockExports
         /// </remarks>
         public static int GetCurrentBrickPrice()
         {
-            // This should query the game's item system
-            // For now, return the default 8-mix coke price
+#if CROSS_COMPAT
             return DockExportsConfig.DEFAULT_BRICK_PRICE;
+#else
+            if (TryGetDynamicBrickPrice(out int price))
+            {
+                return price;
+            }
+            return DockExportsConfig.DEFAULT_BRICK_PRICE;
+#endif
         }
+
+#if !CROSS_COMPAT
+        /// <summary>
+        /// Attempts to read the brick price from the live product definition via S1API.
+        /// </summary>
+        public static bool TryGetDynamicBrickPrice(out int price)
+        {
+            foreach (var itemId in DockExportsConfig.ALLOWED_PRODUCT_IDS)
+            {
+                if (string.IsNullOrWhiteSpace(itemId))
+                {
+                    continue;
+                }
+
+                try
+                {
+                    var definition = ItemManager.GetItemDefinition(itemId);
+                    if (definition is ProductDefinition productDefinition)
+                    {
+                        price = (int)System.Math.Round(productDefinition.BasePrice);
+                        return true;
+                    }
+                }
+                catch (System.Exception ex)
+                {
+                    MelonLogger.Warning($"[DockExports] Failed to resolve price for '{itemId}': {ex.Message}");
+                }
+            }
+
+            price = DockExportsConfig.DEFAULT_BRICK_PRICE;
+            return false;
+        }
+#endif
 
         /// <summary>
         /// Calculates total wholesale shipment payout (instant, no multiplier).

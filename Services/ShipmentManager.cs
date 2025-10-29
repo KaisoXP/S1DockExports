@@ -29,6 +29,8 @@
 /// </list>
 /// </remarks>
 using S1API.Internal.Abstraction;
+using S1API.Items;
+using S1API.Products;
 using S1API.Saveables;
 using System;
 using System.Collections.Generic;
@@ -86,6 +88,17 @@ namespace S1DockExports.Services
     public class ShipmentManager : Saveable
     {
         /// <summary>
+        /// Number of staging slots shown in the transfer UI.
+        /// </summary>
+        public const int PendingSlotCount = 10;
+
+        /// <summary>
+        /// Maximum number of bricks allowed in a single staging slot.
+        /// Matches the requested 20-unit limit.
+        /// </summary>
+        public const int PendingSlotStackLimit = 20;
+
+        /// <summary>
         /// Initializes a new instance of <see cref="ShipmentManager"/>.
         /// </summary>
         /// <remarks>
@@ -132,6 +145,18 @@ namespace S1DockExports.Services
         /// </remarks>
         [SaveableField("ShipmentHistory")]
         private List<ShipmentHistoryEntry> _history = new List<ShipmentHistoryEntry>();
+
+        /// <summary>
+        /// Pending wholesale items staged by the player prior to confirming a shipment.
+        /// </summary>
+        [SaveableField("PendingWholesale")]
+        private PendingShipmentBuffer _pendingWholesale = new PendingShipmentBuffer(ShipmentType.Wholesale);
+
+        /// <summary>
+        /// Pending consignment items staged by the player prior to confirming a shipment.
+        /// </summary>
+        [SaveableField("PendingConsignment")]
+        private PendingShipmentBuffer _pendingConsignment = new PendingShipmentBuffer(ShipmentType.Consignment);
 
         /// <summary>
         /// Last in-game day that a payout was processed (prevents double-processing).
@@ -238,11 +263,12 @@ namespace S1DockExports.Services
         protected override void OnLoaded()
         {
             Instance = this;
+            EnsurePendingBuffers();
             MelonLoader.MelonLogger.Msg("[DockExports] 📂 Shipments loaded from save");
 
             // Log loaded data summary
             string activeInfo = _activeShipment.HasValue
-                ? $"{_activeShipment.Value.Type}, {_activeShipment.Value.PaymentsMade}/{(_activeShipment.Value.Type == ShipmentType.Wholesale ? 1 : 4)} payments"
+                ? $"{_activeShipment.Value.Type}, {_activeShipment.Value.PaymentsMade}/{(_activeShipment.Value.Type == ShipmentType.Wholesale ? 1 : DockExportsConfig.CONSIGNMENT_INSTALLMENTS)} payments"
                 : "none";
 
             MelonLoader.MelonLogger.Msg($"[DockExports] Active: {activeInfo}, History: {_history.Count} entries, Cooldown: {(_wholesaleCooldownEndDay > 0 ? _wholesaleCooldownEndDay + " days" : "none")}");
@@ -297,11 +323,130 @@ namespace S1DockExports.Services
         protected override void OnCreated()
         {
             Instance = this;
+            EnsurePendingBuffers();
             MelonLoader.MelonLogger.Msg("[DockExports] 📂 ShipmentManager created (new save)");
         }
 
         // Note: Manual registration is no longer required in S1API v2.4.2+
         // Classes that inherit from Saveable are automatically discovered
+
+        /// <summary>
+        /// Ensures pending shipment buffers are instantiated and contain the expected slot count.
+        /// </summary>
+        private void EnsurePendingBuffers()
+        {
+            if (_pendingWholesale == null || _pendingWholesale.Mode != ShipmentType.Wholesale)
+            {
+                _pendingWholesale = new PendingShipmentBuffer(ShipmentType.Wholesale);
+            }
+            _pendingWholesale.EnsureSlotCount(PendingSlotCount);
+
+            if (_pendingConsignment == null || _pendingConsignment.Mode != ShipmentType.Consignment)
+            {
+                _pendingConsignment = new PendingShipmentBuffer(ShipmentType.Consignment);
+            }
+            _pendingConsignment.EnsureSlotCount(PendingSlotCount);
+        }
+
+        /// <summary>
+        /// Validates the pending buffer contents for the specified shipment type.
+        /// </summary>
+        private bool TryValidatePendingBuffer(ShipmentType type, PendingShipmentBuffer buffer, out int totalQuantity, out string errorMessage)
+        {
+            EnsurePendingBuffers();
+            buffer.EnsureSlotCount(PendingSlotCount);
+
+            totalQuantity = 0;
+            errorMessage = string.Empty;
+
+            for (int i = 0; i < buffer.Slots.Count; i++)
+            {
+                var slot = buffer.Slots[i];
+
+                if (slot.IsEmpty)
+                {
+                    buffer.SetSlot(i, PendingItemSlot.Empty());
+                    continue;
+                }
+
+                if (slot.Quantity < 0)
+                {
+                    errorMessage = $"Slot {i + 1} has an invalid quantity.";
+                    return false;
+                }
+
+                if (slot.Quantity > PendingSlotStackLimit)
+                {
+                    errorMessage = $"Slot {i + 1} exceeds the {PendingSlotStackLimit}-unit limit.";
+                    return false;
+                }
+
+                if (!TryValidateItem(slot.ItemId, out var definition, out errorMessage))
+                {
+                    return false;
+                }
+
+                slot.DisplayName = definition.Name;
+                buffer.SetSlot(i, slot);
+                totalQuantity += slot.Quantity;
+            }
+
+            if (totalQuantity <= 0)
+            {
+                errorMessage = "Add at least one valid brick before confirming.";
+                return false;
+            }
+
+            int cap = type == ShipmentType.Wholesale
+                ? DockExportsConfig.WHOLESALE_CAP
+                : DockExportsConfig.CONSIGNMENT_CAP;
+
+            if (totalQuantity > cap)
+            {
+                errorMessage = $"Total quantity {totalQuantity} exceeds the {type} cap of {cap}.";
+                return false;
+            }
+
+            errorMessage = string.Empty;
+            return true;
+        }
+
+        /// <summary>
+        /// Validates a staged item entry against the item database.
+        /// </summary>
+        private static bool TryValidateItem(string itemId, out ItemDefinition definition, out string errorMessage)
+        {
+            definition = null!;
+            if (string.IsNullOrWhiteSpace(itemId))
+            {
+                errorMessage = "One or more staging slots contain an unknown item.";
+                return false;
+            }
+
+            try
+            {
+                definition = ItemManager.GetItemDefinition(itemId);
+                if (definition == null)
+                {
+                    errorMessage = $"Item '{itemId}' could not be found in the catalog.";
+                    return false;
+                }
+
+                if (definition.Category != ItemCategory.Product)
+                {
+                    errorMessage = $"'{definition.Name}' cannot be exported. Only drug products are allowed.";
+                    return false;
+                }
+            }
+            catch (Exception ex)
+            {
+                errorMessage = $"Failed to resolve item '{itemId}': {ex.Message}";
+                return false;
+            }
+
+            errorMessage = string.Empty;
+            return true;
+        }
 
         #region Public Properties
 
@@ -337,6 +482,155 @@ namespace S1DockExports.Services
         /// </para>
         /// </remarks>
         public IReadOnlyList<ShipmentHistoryEntry> History => _history.AsReadOnly();
+
+        /// <summary>
+        /// Gets the pending wholesale buffer (mutable, persisted across sessions).
+        /// </summary>
+        public PendingShipmentBuffer PendingWholesale => _pendingWholesale;
+
+        /// <summary>
+        /// Gets the pending consignment buffer (mutable, persisted across sessions).
+        /// </summary>
+        public PendingShipmentBuffer PendingConsignment => _pendingConsignment;
+
+        /// <summary>
+        /// Retrieves the pending buffer associated with the specified shipment type.
+        /// </summary>
+        /// <param name="type">Shipment type determining which buffer to retrieve.</param>
+        public PendingShipmentBuffer GetPendingBuffer(ShipmentType type) =>
+            type == ShipmentType.Wholesale ? _pendingWholesale : _pendingConsignment;
+
+        /// <summary>
+        /// Clears all staged items for the specified shipment type.
+        /// </summary>
+        public void ClearPendingBuffer(ShipmentType type)
+        {
+            GetPendingBuffer(type).Clear();
+        }
+
+        /// <summary>
+        /// Retrieves a snapshot of the slot at the specified index.
+        /// </summary>
+        public PendingItemSlot GetPendingSlot(ShipmentType type, int slotIndex)
+        {
+            return GetPendingBuffer(type).GetSlot(slotIndex);
+        }
+
+        /// <summary>
+        /// Attempts to stage an item within the pending buffer.
+        /// </summary>
+        public bool TryStageItem(ShipmentType type, int slotIndex, string itemId, int quantity, out string errorMessage)
+        {
+            if (slotIndex < 0 || slotIndex >= PendingSlotCount)
+            {
+                errorMessage = "Invalid slot index.";
+                return false;
+            }
+
+            if (quantity < 0)
+            {
+                errorMessage = "Quantity cannot be negative.";
+                return false;
+            }
+
+            var buffer = GetPendingBuffer(type);
+
+            if (quantity == 0 || string.IsNullOrWhiteSpace(itemId))
+            {
+                buffer.SetSlot(slotIndex, PendingItemSlot.Empty());
+                errorMessage = string.Empty;
+                return true;
+            }
+
+            if (quantity > PendingSlotStackLimit)
+            {
+                errorMessage = $"Each slot can hold at most {PendingSlotStackLimit} bricks.";
+                return false;
+            }
+
+            if (!TryValidateItem(itemId, out var definition, out errorMessage))
+            {
+                return false;
+            }
+
+            var slot = new PendingItemSlot
+            {
+                ItemId = itemId,
+                Quantity = quantity,
+                DisplayName = definition.Name
+            };
+            buffer.SetSlot(slotIndex, slot);
+
+            errorMessage = string.Empty;
+            return true;
+        }
+
+        /// <summary>
+        /// Attempts to calculate the staged shipment for UI display.
+        /// </summary>
+        /// <param name="type">Shipment type to preview.</param>
+        /// <param name="calculation">Resulting calculation data.</param>
+        /// <param name="errorMessage">Error message when validation fails.</param>
+        /// <returns><c>true</c> if calculation succeeded; otherwise <c>false</c>.</returns>
+        public bool TryCalculatePendingShipment(ShipmentType type, out PendingShipmentCalculation calculation, out string errorMessage)
+        {
+            var buffer = GetPendingBuffer(type);
+            if (!TryValidatePendingBuffer(type, buffer, out int totalQuantity, out errorMessage))
+            {
+                calculation = default;
+                return false;
+            }
+
+            int unitPrice = PriceHelper.GetCurrentBrickPrice();
+            int totalValue = type == ShipmentType.Wholesale
+                ? PriceHelper.CalculateWholesalePayout(totalQuantity, unitPrice)
+                : PriceHelper.CalculateConsignmentValue(totalQuantity, unitPrice);
+
+            int installment = type == ShipmentType.Consignment
+                ? PriceHelper.CalculateWeeklyPayout(totalValue)
+                : totalValue;
+
+            calculation = new PendingShipmentCalculation(type, totalQuantity, unitPrice, totalValue, installment);
+            errorMessage = string.Empty;
+            return true;
+        }
+
+        /// <summary>
+        /// Validates the staged shipment and, if valid, creates the shipment entry.
+        /// </summary>
+        /// <param name="type">Shipment type to finalize.</param>
+        /// <param name="calculation">Output calculation data.</param>
+        /// <param name="errorMessage">Error when validation fails.</param>
+        public bool TryFinalizePendingShipment(ShipmentType type, out PendingShipmentCalculation calculation, out string errorMessage)
+        {
+            if (!TryCalculatePendingShipment(type, out calculation, out errorMessage))
+            {
+                return false;
+            }
+
+            int currentDay = GameAccess.GetElapsedDays();
+
+            try
+            {
+                if (type == ShipmentType.Wholesale)
+                {
+                    CreateWholesaleShipment(calculation.TotalQuantity, calculation.UnitPrice, currentDay);
+                    ProcessWholesalePayment(currentDay);
+                }
+                else
+                {
+                    CreateConsignmentShipment(calculation.TotalQuantity, calculation.UnitPrice, DockExportsConfig.CONSIGNMENT_MULTIPLIER, currentDay);
+                }
+            }
+            catch (InvalidOperationException ex)
+            {
+                errorMessage = ex.Message;
+                return false;
+            }
+
+            ClearPendingBuffer(type);
+            return true;
+        }
 
         /// <summary>
         /// Gets or sets the last in-game day that a payout was processed.
@@ -818,6 +1112,8 @@ namespace S1DockExports.Services
             _history.Clear();
             _lastProcessedDay = -1;
             _wholesaleCooldownEndDay = -1;
+            _pendingWholesale.Clear();
+            _pendingConsignment.Clear();
         }
 
         #endregion
@@ -1053,6 +1349,142 @@ namespace S1DockExports.Services
             string lossStr = LossPercent > 0 ? $" ({LossPercent}% loss)" : " (no losses)";
             return $"[{CompletedDate:MMM dd, yyyy}] {typeStr}\n" +
                    $"  {Quantity} bricks → ${TotalPaid:N0}{lossStr}";
+        }
+    }
+
+    /// <summary>
+    /// Mutable buffer used to stage inventory items prior to creating a shipment.
+    /// </summary>
+    [Serializable]
+    public class PendingShipmentBuffer
+    {
+        /// <summary>
+        /// Backing list of slots. Always sized to <see cref="ShipmentManager.PendingSlotCount"/>.
+        /// </summary>
+        public List<PendingItemSlot> Slots = new List<PendingItemSlot>();
+
+        /// <summary>
+        /// Associated shipment type (determines validation rules).
+        /// </summary>
+        public ShipmentType Mode { get; private set; } = ShipmentType.Wholesale;
+
+        public PendingShipmentBuffer() : this(ShipmentType.Wholesale) { }
+
+        public PendingShipmentBuffer(ShipmentType mode)
+        {
+            Mode = mode;
+            EnsureSlotCount(ShipmentManager.PendingSlotCount);
+        }
+
+        /// <summary>
+        /// Ensures slot list exists and has the required length.
+        /// </summary>
+        public void EnsureSlotCount(int count)
+        {
+            if (Slots == null)
+            {
+                Slots = new List<PendingItemSlot>(count);
+            }
+
+            while (Slots.Count < count)
+            {
+                Slots.Add(PendingItemSlot.Empty());
+            }
+
+            if (Slots.Count > count)
+            {
+                Slots.RemoveRange(count, Slots.Count - count);
+            }
+        }
+
+        /// <summary>
+        /// Returns the slot value at the specified index.
+        /// </summary>
+        public PendingItemSlot GetSlot(int index)
+        {
+            EnsureSlotCount(Math.Max(ShipmentManager.PendingSlotCount, index + 1));
+            return Slots[index];
+        }
+
+        /// <summary>
+        /// Overwrites the slot value at the specified index.
+        /// </summary>
+        public void SetSlot(int index, PendingItemSlot slot)
+        {
+            EnsureSlotCount(Math.Max(ShipmentManager.PendingSlotCount, index + 1));
+            Slots[index] = slot;
+        }
+
+        /// <summary>
+        /// Clears all slot entries.
+        /// </summary>
+        public void Clear()
+        {
+            EnsureSlotCount(ShipmentManager.PendingSlotCount);
+            for (int i = 0; i < Slots.Count; i++)
+            {
+                Slots[i] = PendingItemSlot.Empty();
+            }
+        }
+
+        /// <summary>
+        /// Replaces the underlying slot list (used when deserializing).
+        /// </summary>
+        public void ReplaceSlots(IEnumerable<PendingItemSlot> slots)
+        {
+            Slots = slots?.ToList() ?? new List<PendingItemSlot>();
+            EnsureSlotCount(ShipmentManager.PendingSlotCount);
+        }
+    }
+
+    /// <summary>
+    /// Staging slot storing the item id and quantity selected by the player.
+    /// </summary>
+    [Serializable]
+    public struct PendingItemSlot
+    {
+        public string ItemId;
+        public int Quantity;
+        public string? DisplayName;
+        public string? VariantId;
+
+        public bool IsEmpty => string.IsNullOrWhiteSpace(ItemId) || Quantity <= 0;
+
+        public static PendingItemSlot Empty() => new PendingItemSlot
+        {
+            ItemId = string.Empty,
+            Quantity = 0,
+            DisplayName = null,
+            VariantId = null
+        };
+
+        public void Clear()
+        {
+            ItemId = string.Empty;
+            Quantity = 0;
+            DisplayName = null;
+            VariantId = null;
+        }
+    }
+
+    /// <summary>
+    /// Represents the calculated totals for a staged shipment.
+    /// </summary>
+    public readonly struct PendingShipmentCalculation
+    {
+        public ShipmentType Type { get; }
+        public int TotalQuantity { get; }
+        public int UnitPrice { get; }
+        public int TotalValue { get; }
+        public int InstallmentValue { get; }
+
+        public PendingShipmentCalculation(ShipmentType type, int totalQuantity, int unitPrice, int totalValue, int installmentValue)
+        {
+            Type = type;
+            TotalQuantity = totalQuantity;
+            UnitPrice = unitPrice;
+            TotalValue = totalValue;
+            InstallmentValue = installmentValue;
         }
     }
 
