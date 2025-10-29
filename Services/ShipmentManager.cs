@@ -596,39 +596,35 @@ namespace S1DockExports.Services
         }
 
         /// <summary>
-        /// Validates the staged shipment and, if valid, creates the shipment entry.
+        /// Validates the staged shipment against gameplay constraints before final confirmation.
         /// </summary>
         /// <param name="type">Shipment type to finalize.</param>
+        /// <param name="currentDay">Current in-game day (used for cooldown validation).</param>
         /// <param name="calculation">Output calculation data.</param>
         /// <param name="errorMessage">Error when validation fails.</param>
-        public bool TryFinalizePendingShipment(ShipmentType type, out PendingShipmentCalculation calculation, out string errorMessage)
+        /// <remarks>Actual shipment creation is performed by <see cref="S1DockExports.DockExportsMod"/> after this method succeeds.</remarks>
+        public bool TryFinalizePendingShipment(ShipmentType type, int currentDay, out PendingShipmentCalculation calculation, out string errorMessage)
         {
             if (!TryCalculatePendingShipment(type, out calculation, out errorMessage))
             {
                 return false;
             }
 
-            int currentDay = GameAccess.GetElapsedDays();
-
-            try
+            if (_activeShipment.HasValue)
             {
-                if (type == ShipmentType.Wholesale)
-                {
-                    CreateWholesaleShipment(calculation.TotalQuantity, calculation.UnitPrice, currentDay);
-                    ProcessWholesalePayment(currentDay);
-                }
-                else
-                {
-                    CreateConsignmentShipment(calculation.TotalQuantity, calculation.UnitPrice, DockExportsConfig.CONSIGNMENT_MULTIPLIER, currentDay);
-                }
-            }
-            catch (InvalidOperationException ex)
-            {
-                errorMessage = ex.Message;
+                var active = _activeShipment.Value.Type == ShipmentType.Wholesale ? "wholesale" : "consignment";
+                errorMessage = $"Finish your current {active} shipment before starting another.";
                 return false;
             }
 
-            ClearPendingBuffer(type);
+            if (type == ShipmentType.Wholesale && IsWholesaleOnCooldown(currentDay))
+            {
+                int daysRemaining = WholesaleDaysRemaining(currentDay);
+                errorMessage = $"Wholesale is on cooldown for {daysRemaining} more day{(daysRemaining == 1 ? string.Empty : "s")}.";
+                return false;
+            }
+
+            errorMessage = string.Empty;
             return true;
         }
 

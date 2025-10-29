@@ -77,7 +77,7 @@ namespace S1DockExports
     /// var mod = DockExportsMod.Instance;
     /// if (mod != null &amp;&amp; mod.BrokerUnlocked)
     /// {
-    ///     mod.DebugCreateWholesale(100);
+    ///     mod.TryConfirmPendingShipment(ShipmentType.Wholesale, out var calc, out var error);
     /// }
     /// </code>
     /// </example>
@@ -538,144 +538,88 @@ namespace S1DockExports
         #region Public API for DockExportsApp
 
         /// <summary>
-        /// Creates a wholesale shipment with instant payout. DEBUG METHOD for testing.
+        /// Attempts to confirm the staged shipment for the requested type.
         /// </summary>
-        /// <param name="quantity">Number of bricks to ship (will be capped at <see cref="DockExportsConfig.WHOLESALE_CAP"/>).</param>
+        /// <param name="type">Shipment mode being confirmed (wholesale or consignment).</param>
+        /// <param name="calculation">Validated calculation snapshot for UI summaries.</param>
+        /// <param name="errorMessage">User-facing error when the confirmation fails.</param>
+        /// <returns><c>true</c> when the shipment was created successfully; otherwise <c>false</c>.</returns>
         /// <remarks>
-        /// <para><strong>Wholesale Mechanics:</strong></para>
-        /// <list type="bullet">
-        /// <item>Cap: 100 bricks (enforced automatically)</item>
-        /// <item>Payout: Instant (fair market price)</item>
-        /// <item>Cooldown: 30 in-game days</item>
-        /// <item>No risk: Always get full payment</item>
-        /// </list>
-        /// <para><strong>Processing Steps:</strong></para>
-        /// <list type="number">
-        /// <item>Validate quantity against cap</item>
-        /// <item>Get current brick price from PriceHelper</item>
-        /// <item>Call ShipmentManager.CreateWholesaleShipment()</item>
-        /// <item>Call ShipmentManager.ProcessWholesalePayment() (instant)</item>
-        /// <item>Add money to player</item>
-        /// <item>Send broker confirmation message</item>
-        /// <item>Save game</item>
-        /// </list>
-        /// <para><strong>Exceptions Handled:</strong></para>
         /// <para>
-        /// If ShipmentManager throws InvalidOperationException (e.g., active shipment already exists
-        /// or wholesale is on cooldown), the error is logged and a broker message is sent to the player.
+        /// Mirrors the confirmation flow implemented in S1NotesApp: validate staged data, commit state,
+        /// broadcast broker messaging, and request a save. Keeps business logic in <see cref="ShipmentManager"/>
+        /// while the UI remains a thin client.
+        /// </para>
+        /// <para>
+        /// Wholesale confirmations pay out instantly (funds credited and history entry archived). Consignment
+        /// confirmations schedule the four-week payout loop with no immediate cash transfer.
         /// </para>
         /// </remarks>
-        /// <example>
-        /// <code>
-        /// DockExportsMod.Instance?.DebugCreateWholesale(100); // Ship 100 bricks wholesale
-        /// </code>
-        /// </example>
-        public void DebugCreateWholesale(int quantity)
+        public bool TryConfirmPendingShipment(ShipmentType type, out PendingShipmentCalculation calculation, out string errorMessage)
         {
-            if (quantity > DockExportsConfig.WHOLESALE_CAP)
+            calculation = default;
+            errorMessage = string.Empty;
+
+            var manager = ShipmentManager.Instance;
+            if (manager == null)
             {
-                MelonLogger.Warning($"[DockExports] Wholesale quantity {quantity} exceeds cap of {DockExportsConfig.WHOLESALE_CAP}, capping");
-                quantity = DockExportsConfig.WHOLESALE_CAP;
+                errorMessage = "Shipment systems are not ready yet.";
+                MelonLogger.Warning("[DockExports] ✗ Cannot confirm shipment: manager unavailable");
+                return false;
             }
 
             int currentDay = GameAccess.GetElapsedDays();
-            int brickPrice = PriceHelper.GetCurrentBrickPrice();
-
-            MelonLogger.Msg($"[DockExports] 📦 Creating wholesale shipment: qty={quantity}, price=${brickPrice:N0}/brick, day={currentDay}");
+            if (!manager.TryFinalizePendingShipment(type, currentDay, out calculation, out errorMessage))
+            {
+                MelonLogger.Msg($"[DockExports] ✗ Staged {type} failed validation: {errorMessage}");
+                return false;
+            }
 
             try
             {
-                ShipmentManager.Instance.CreateWholesaleShipment(quantity, brickPrice, currentDay);
-                MelonLogger.Msg("[DockExports] ✓ Wholesale shipment created, processing instant payment");
-
-                int payout = ShipmentManager.Instance.ProcessWholesalePayment(currentDay);
-                MelonLogger.Msg($"[DockExports] ✓ Wholesale complete, total paid: ${payout:N0}");
-
-                AddMoneyToPlayer(payout);
-                SendBrokerMessage(BrokerMessages.WholesaleConfirmed(quantity, payout));
-                DockExportsApp.RefreshData();
-
-                MelonLogger.Msg("[DockExports] 💾 Requesting game save");
-                Saveable.RequestGameSave(true);
-            }
-            catch (InvalidOperationException ex)
-            {
-                MelonLogger.Warning($"[DockExports] ⏳ Wholesale blocked: {ex.Message}");
-                SendBrokerMessage($"Can't move wholesale right now. {ex.Message}");
-            }
-        }
-
-        /// <summary>
-        /// Creates a consignment shipment with 4 weekly payouts. DEBUG METHOD for testing.
-        /// </summary>
-        /// <param name="quantity">Number of bricks to ship (will be capped at <see cref="DockExportsConfig.CONSIGNMENT_CAP"/>).</param>
-        /// <remarks>
-        /// <para><strong>Consignment Mechanics:</strong></para>
-        /// <list type="bullet">
-        /// <item>Cap: 200 bricks (enforced automatically)</item>
-        /// <item>Price: 1.6x fair market price</item>
-        /// <item>Payout: 25% per Friday for 4 weeks</item>
-        /// <item>Risk: 25% chance per week of 15-60% loss</item>
-        /// </list>
-        /// <para><strong>Processing Steps:</strong></para>
-        /// <list type="number">
-        /// <item>Validate quantity against cap</item>
-        /// <item>Get current brick price * 1.6x multiplier</item>
-        /// <item>Call ShipmentManager.CreateConsignmentShipment()</item>
-        /// <item>Send broker confirmation message with total value</item>
-        /// <item>Save game</item>
-        /// <item>Wait for Fridays (automatic via OnUpdate → ProcessConsignmentWeek)</item>
-        /// </list>
-        /// <para><strong>Exceptions Handled:</strong></para>
-        /// <para>
-        /// If ShipmentManager throws InvalidOperationException (e.g., active shipment already exists),
-        /// the error is logged and a broker message is sent to the player.
-        /// </para>
-        /// </remarks>
-        /// <example>
-        /// <code>
-        /// DockExportsMod.Instance?.DebugCreateConsignment(200); // Ship 200 bricks on consignment
-        /// </code>
-        /// </example>
-        public void DebugCreateConsignment(int quantity)
-        {
-            if (quantity > DockExportsConfig.CONSIGNMENT_CAP)
-            {
-                MelonLogger.Warning($"[DockExports] Consignment quantity {quantity} exceeds cap of {DockExportsConfig.CONSIGNMENT_CAP}, capping");
-                quantity = DockExportsConfig.CONSIGNMENT_CAP;
-            }
-
-            int currentDay = GameAccess.GetElapsedDays();
-            int brickPrice = PriceHelper.GetCurrentBrickPrice();
-
-            MelonLogger.Msg($"[DockExports] 📦 Creating consignment shipment: qty={quantity}, price=${brickPrice:N0}/brick, multiplier={DockExportsConfig.CONSIGNMENT_MULTIPLIER}x, day={currentDay}");
-
-            try
-            {
-                ShipmentManager.Instance.CreateConsignmentShipment(quantity, brickPrice, DockExportsConfig.CONSIGNMENT_MULTIPLIER, currentDay);
-
-                var shipment = ShipmentManager.Instance.ActiveShipment;
-                if (shipment.HasValue)
+                if (type == ShipmentType.Wholesale)
                 {
-                    MelonLogger.Msg($"[DockExports] ✓ Consignment created: total=${shipment.Value.TotalValue:N0}, {DockExportsConfig.CONSIGNMENT_INSTALLMENTS} weekly payments");
+                    MelonLogger.Msg($"[DockExports] 📦 Confirming wholesale: {calculation.TotalQuantity} bricks @ ${calculation.UnitPrice:N0}/brick");
+                    manager.CreateWholesaleShipment(calculation.TotalQuantity, calculation.UnitPrice, currentDay);
 
-                    SendBrokerMessage(BrokerMessages.ConsignmentLocked(
-                        shipment.Value.Quantity,
-                        shipment.Value.UnitPrice,
-                        shipment.Value.TotalValue
-                    ));
+                    int payout = manager.ProcessWholesalePayment(currentDay);
+                    MelonLogger.Msg($"[DockExports] 💰 Wholesale payout processed: ${payout:N0}");
+
+                    AddMoneyToPlayer(payout);
+                    SendBrokerMessage(BrokerMessages.WholesaleConfirmed(calculation.TotalQuantity, payout));
                 }
+                else
+                {
+                    MelonLogger.Msg($"[DockExports] 📦 Confirming consignment: {calculation.TotalQuantity} bricks, total value ${calculation.TotalValue:N0}");
+                    manager.CreateConsignmentShipment(calculation.TotalQuantity, calculation.UnitPrice, DockExportsConfig.CONSIGNMENT_MULTIPLIER, currentDay);
 
-                DockExportsApp.RefreshData();
-
-                MelonLogger.Msg("[DockExports] 💾 Requesting game save");
-                Saveable.RequestGameSave(true);
+                    var shipment = manager.ActiveShipment;
+                    if (shipment.HasValue)
+                    {
+                        MelonLogger.Msg($"[DockExports] ⏳ Consignment scheduled: {DockExportsConfig.CONSIGNMENT_INSTALLMENTS} weekly payments");
+                        SendBrokerMessage(BrokerMessages.ConsignmentLocked(
+                            shipment.Value.Quantity,
+                            shipment.Value.UnitPrice,
+                            shipment.Value.TotalValue
+                        ));
+                    }
+                }
             }
             catch (InvalidOperationException ex)
             {
-                MelonLogger.Warning($"[DockExports] ✗ Consignment blocked: {ex.Message}");
-                SendBrokerMessage($"Can't create consignment right now. {ex.Message}");
+                errorMessage = ex.Message;
+                MelonLogger.Warning($"[DockExports] ✗ Unable to finalize {type}: {ex.Message}");
+                return false;
             }
+
+            manager.ClearPendingBuffer(type);
+            DockExportsApp.RefreshData();
+
+            MelonLogger.Msg("[DockExports] 💾 Requesting game save");
+            Saveable.RequestGameSave(true);
+
+            errorMessage = string.Empty;
+            return true;
         }
 
         /// <summary>

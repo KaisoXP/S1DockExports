@@ -26,6 +26,7 @@
 /// </para>
 /// </remarks>
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Reflection;
@@ -35,9 +36,11 @@ using UnityEngine.EventSystems;
 using UnityEngine.UI;
 using S1API.PhoneApp;
 using S1API.UI;
+using S1API.Internal.Abstraction;
 using S1API.Internal.Utils;
 using S1API.Input;
 using S1DockExports.Services;
+using GameAccess = S1DockExports.Integrations.GameAccess;
 
 namespace S1DockExports
 {
@@ -153,22 +156,82 @@ namespace S1DockExports
         /// <summary>
         /// Create tab panel GameObject (shipment creation UI).
         /// </summary>
-        private GameObject _createPanel;
+        private GameObject _createPanel = null!;
 
         /// <summary>
         /// Active tab panel GameObject (current shipment status UI).
         /// </summary>
-        private GameObject _activePanel;
+        private GameObject _activePanel = null!;
 
         /// <summary>
         /// History tab panel GameObject (completed shipments log UI).
         /// </summary>
-        private GameObject _historyPanel;
+        private GameObject _historyPanel = null!;
 
         /// <summary>
-        /// Lock screen panel GameObject (shown when broker is not unlocked).
+        /// Overlay window used to stage inventory items before confirming a shipment.
         /// </summary>
-        private GameObject _lockScreen;
+        private GameObject? _transferWindow;
+
+        /// <summary>
+        /// Canvas group controlling visibility/interactivity of the transfer window.
+        /// </summary>
+        private CanvasGroup? _transferCanvas;
+
+        /// <summary>
+        /// Transfer window title text (displays current shipment mode).
+        /// </summary>
+        private Text? _transferTitle;
+
+        /// <summary>
+        /// Informational summary text showing total quantity/value preview.
+        /// </summary>
+        private Text? _transferInfoText;
+
+        /// <summary>
+        /// Status text showing validation warnings or success messages.
+        /// </summary>
+        private Text? _transferStatusText;
+
+        /// <summary>
+        /// Confirm button reference for enabling/disabling based on validation.
+        /// </summary>
+        private Button? _transferConfirmButton;
+
+        /// <summary>
+        /// Back button reference (hides the window without clearing staged slots).
+        /// </summary>
+        private Button? _transferBackButton;
+
+        /// <summary>
+        /// Cached slot behaviours for the transfer grid.
+        /// </summary>
+        private readonly List<TransferSlotView> _transferSlots = new List<TransferSlotView>();
+
+        /// <summary>
+        /// Currently active transfer mode (wholesale or consignment).
+        /// </summary>
+        private ShipmentType _activeTransferMode = ShipmentType.Wholesale;
+
+        /// <summary>
+        /// Tracks whether the transfer window is currently visible.
+        /// </summary>
+        private bool _transferVisible;
+
+        /// <summary>
+        /// Default background color for empty staging slots.
+        /// </summary>
+        private static readonly Color TransferSlotIdleColor = new Color(0.14f, 0.16f, 0.2f, 0.95f);
+
+        /// <summary>
+        /// Highlight color applied when pointer hovers over a slot.
+        /// </summary>
+        private static readonly Color TransferSlotHighlightColor = new Color(0.26f, 0.32f, 0.42f, 0.95f);
+
+        /// <summary>
+        /// Background color applied when the slot contains a staged item.
+        /// </summary>
+        private static readonly Color TransferSlotFilledColor = new Color(0.18f, 0.22f, 0.3f, 0.95f);
 
         /// <summary>
         /// Called by S1API when the app is first created (before UI is built).
@@ -380,6 +443,7 @@ namespace S1DockExports
             RefreshCreatePanel();
             RefreshActivePanel();
             RefreshHistoryPanel();
+            RefreshTransferWindow();
         }
 
         /// <summary>
@@ -407,9 +471,7 @@ namespace S1DockExports
         {
             MelonLoader.MelonLogger.Msg("[DockExports] 📱 Shipments loaded event, refreshing UI panels");
             // Refresh the UI when shipments are loaded from save data
-            RefreshCreatePanel();
-            RefreshActivePanel();
-            RefreshHistoryPanel();
+            RefreshAllPanels();
         }
 
         /// <summary>
@@ -488,6 +550,7 @@ namespace S1DockExports
             BuildCreatePanel(_createPanel.transform);
             BuildActivePanel(_activePanel.transform);
             BuildHistoryPanel(_historyPanel.transform);
+            BuildTransferWindow(root.transform);
 
             // Initial refresh of create panel to show cooldown status
             RefreshCreatePanel();
@@ -716,6 +779,571 @@ namespace S1DockExports
 
         #endregion
 
+        #region Transfer Window
+
+        /// <summary>
+        /// Builds the transfer overlay used to stage shipment inventory.
+        /// </summary>
+        /// <param name="parent">Parent transform (root panel).</param>
+        private void BuildTransferWindow(Transform parent)
+        {
+            if (_transferWindow != null)
+                return;
+
+            _transferSlots.Clear();
+
+            var overlay = UIFactory.Panel("DE_TransferOverlay", parent, new Color(0f, 0f, 0f, 0.35f), fullAnchor: true);
+            overlay.transform.SetAsLastSibling();
+            overlay.SetActive(false);
+
+            var canvas = overlay.AddComponent<CanvasGroup>();
+            canvas.alpha = 0f;
+            canvas.interactable = false;
+            canvas.blocksRaycasts = false;
+
+            var frame = UIFactory.Panel("DE_TransferFrame", overlay.transform, new Color(0.11f, 0.13f, 0.17f, 0.97f));
+            var frameRect = frame.GetComponent<RectTransform>();
+            frameRect.anchorMin = new Vector2(0.08f, 0.12f);
+            frameRect.anchorMax = new Vector2(0.92f, 0.88f);
+            frameRect.offsetMin = Vector2.zero;
+            frameRect.offsetMax = Vector2.zero;
+
+            UIFactory.VerticalLayoutOnGO(frame, spacing: 14, padding: new RectOffset(24, 24, 24, 24));
+
+            _transferTitle = UIFactory.Text("DE_TransferTitle", "Stage Shipment", frame.transform, 20, TextAnchor.MiddleLeft, FontStyle.Bold).GetComponent<Text>();
+
+            _transferInfoText = UIFactory.Text(
+                "DE_TransferSummary",
+                "Drag bricks from your inventory into the slots below.",
+                frame.transform,
+                14,
+                TextAnchor.UpperLeft).GetComponent<Text>();
+
+            _transferStatusText = UIFactory.Text(
+                "DE_TransferStatus",
+                string.Empty,
+                frame.transform,
+                13,
+                TextAnchor.UpperLeft,
+                FontStyle.Italic).GetComponent<Text>();
+            _transferStatusText.color = DockExportsConfig.Warning;
+
+            var gridContainer = UIFactory.Panel("DE_TransferGrid", frame.transform, new Color(0.09f, 0.1f, 0.13f, 0.98f));
+            var gridRect = gridContainer.GetComponent<RectTransform>();
+            gridRect.anchorMin = new Vector2(0f, 0f);
+            gridRect.anchorMax = new Vector2(1f, 1f);
+            gridRect.offsetMin = Vector2.zero;
+            gridRect.offsetMax = Vector2.zero;
+
+            var gridLayout = gridContainer.AddComponent<GridLayoutGroup>();
+            gridLayout.constraint = GridLayoutGroup.Constraint.FixedColumnCount;
+            gridLayout.constraintCount = 5;
+            gridLayout.cellSize = new Vector2(150f, 90f);
+            gridLayout.spacing = new Vector2(12f, 12f);
+            gridLayout.padding = new RectOffset(10, 10, 10, 10);
+
+            for (int i = 0; i < ShipmentManager.PendingSlotCount; i++)
+            {
+                var slotGO = UIFactory.Panel($"DE_TransferSlot_{i}", gridContainer.transform, TransferSlotIdleColor);
+                slotGO.name = $"DE_TransferSlot_{i}";
+
+                UIFactory.VerticalLayoutOnGO(slotGO, spacing: 6, padding: new RectOffset(8, 8, 8, 8));
+
+                var background = slotGO.GetComponent<Image>() ?? slotGO.AddComponent<Image>();
+                var nameText = UIFactory.Text($"DE_TransferSlotName_{i}", "Empty", slotGO.transform, 14, TextAnchor.UpperCenter, FontStyle.Bold).GetComponent<Text>();
+                var qtyText = UIFactory.Text($"DE_TransferSlotQty_{i}", "—", slotGO.transform, 12, TextAnchor.MiddleCenter).GetComponent<Text>();
+
+                var (clearGO, clearButton, clearLabel) = UIFactory.RoundedButtonWithLabel(
+                    $"DE_TransferSlotClear_{i}",
+                    "Clear",
+                    slotGO.transform,
+                    new Color(0.3f, 0.32f, 0.36f, 1f),
+                    90f,
+                    28f,
+                    12,
+                    Color.white);
+                int slotIndex = i;
+                ButtonUtils.AddListener(clearButton, () => ClearTransferSlot(slotIndex));
+
+                AttachSlotEventHandlers(slotIndex, slotGO);
+
+                var view = new TransferSlotView(background, nameText, qtyText, clearButton);
+                view.Update(PendingItemSlot.Empty());
+                _transferSlots.Add(view);
+            }
+
+            var buttonsRow = UIFactory.ButtonRow("DE_TransferButtons", frame.transform, spacing: 12f, alignment: TextAnchor.MiddleRight);
+            var (confirmGO, confirmBtn, confirmLbl) = UIFactory.RoundedButtonWithLabel(
+                "DE_TransferConfirm",
+                "Confirm Transfer",
+                buttonsRow.transform,
+                DockExportsConfig.Accent,
+                190f,
+                40f,
+                15,
+                Color.black);
+            _transferConfirmButton = confirmBtn;
+            ButtonUtils.AddListener(confirmBtn, HandleTransferConfirmation);
+
+            var (backGO, backBtn, backLbl) = UIFactory.RoundedButtonWithLabel(
+                "DE_TransferBack",
+                "Back",
+                buttonsRow.transform,
+                new Color(0.28f, 0.28f, 0.32f, 1f),
+                120f,
+                40f,
+                15,
+                Color.white);
+            _transferBackButton = backBtn;
+            ButtonUtils.AddListener(backBtn, HideTransferWindow);
+
+            _transferWindow = overlay;
+            _transferCanvas = canvas;
+        }
+
+        /// <summary>
+        /// Shows the transfer window for the specified shipment type.
+        /// </summary>
+        private void ShowTransferWindow(ShipmentType mode)
+        {
+            if (_transferWindow == null || _transferCanvas == null)
+                return;
+
+            _activeTransferMode = mode;
+            _transferVisible = true;
+
+            _transferWindow.SetActive(true);
+            _transferCanvas.alpha = 1f;
+            _transferCanvas.blocksRaycasts = true;
+            _transferCanvas.interactable = true;
+
+            string title = mode == ShipmentType.Wholesale ? "Stage Wholesale Shipment" : "Stage Consignment Shipment";
+            if (_transferTitle != null)
+                _transferTitle.text = title;
+
+            SetTransferStatus("Drag bricks into the staging slots. Right-click or press Clear to empty a slot.", false);
+            RefreshTransferWindow();
+        }
+
+        /// <summary>
+        /// Hides the transfer window without clearing staged items.
+        /// </summary>
+        private void HideTransferWindow()
+        {
+            if (_transferWindow == null || _transferCanvas == null)
+                return;
+
+            _transferVisible = false;
+            _transferCanvas.alpha = 0f;
+            _transferCanvas.blocksRaycasts = false;
+            _transferCanvas.interactable = false;
+            _transferWindow.SetActive(false);
+        }
+
+        /// <summary>
+        /// Refreshes slot visuals and recalculates shipment preview values.
+        /// </summary>
+        private void RefreshTransferWindow()
+        {
+            if (!_transferVisible)
+                return;
+
+            var manager = ShipmentManager.Instance;
+            if (manager == null)
+                return;
+
+            var buffer = manager.GetPendingBuffer(_activeTransferMode);
+            buffer.EnsureSlotCount(ShipmentManager.PendingSlotCount);
+
+            for (int i = 0; i < _transferSlots.Count && i < buffer.Slots.Count; i++)
+            {
+                _transferSlots[i].Update(buffer.Slots[i]);
+            }
+
+            RefreshTransferValidation();
+        }
+
+        /// <summary>
+        /// Recomputes shipment totals and updates the confirm button/state text.
+        /// </summary>
+        private void RefreshTransferValidation()
+        {
+            var manager = ShipmentManager.Instance;
+            if (manager == null)
+                return;
+
+            if (!manager.TryCalculatePendingShipment(_activeTransferMode, out var calculation, out var error))
+            {
+                if (_transferInfoText != null)
+                    _transferInfoText.text = "Add valid product bricks to enable confirmation.";
+
+                if (!string.IsNullOrWhiteSpace(error))
+                    SetTransferStatus(error, true);
+
+                UpdateConfirmButtonState(false);
+                return;
+            }
+
+            if (!manager.TryFinalizePendingShipment(_activeTransferMode, GameAccess.GetElapsedDays(), out var finalized, out var finalizeError))
+            {
+                if (_transferInfoText != null)
+                    _transferInfoText.text = $"{calculation.TotalQuantity} bricks staged • Fair price ${calculation.UnitPrice:N0}";
+
+                if (!string.IsNullOrWhiteSpace(finalizeError))
+                    SetTransferStatus(finalizeError, true);
+
+                UpdateConfirmButtonState(false);
+                return;
+            }
+
+            var info = $"{finalized.TotalQuantity} bricks staged • Fair price ${finalized.UnitPrice:N0}";
+            if (_activeTransferMode == ShipmentType.Consignment)
+            {
+                info += $" • Total ${finalized.TotalValue:N0} (Weekly ${finalized.InstallmentValue:N0})";
+            }
+            else
+            {
+                info += $" • Instant payout ${finalized.TotalValue:N0}";
+            }
+
+            if (_transferInfoText != null)
+                _transferInfoText.text = info;
+
+            SetTransferStatus(string.Empty, false);
+            UpdateConfirmButtonState(true);
+        }
+
+        /// <summary>
+        /// Wires Unity event triggers to a staging slot so we can handle drag/hover/click interactions.
+        /// </summary>
+        private void AttachSlotEventHandlers(int slotIndex, GameObject slotGO)
+        {
+            var trigger = slotGO.GetComponent<EventTrigger>() ?? slotGO.AddComponent<EventTrigger>();
+            trigger.triggers?.Clear();
+
+            EventHelper.AddEventTrigger(trigger, EventTriggerType.Drop, data =>
+            {
+                if (data is PointerEventData ped)
+                {
+                    HandleSlotDrop(slotIndex, ped);
+                }
+            });
+
+            EventHelper.AddEventTrigger(trigger, EventTriggerType.PointerClick, data =>
+            {
+                if (data is PointerEventData ped)
+                {
+                    HandleSlotClick(slotIndex, ped);
+                }
+            });
+
+            EventHelper.AddEventTrigger(trigger, EventTriggerType.PointerEnter, _ => HandleSlotHover(slotIndex, true));
+            EventHelper.AddEventTrigger(trigger, EventTriggerType.PointerExit, _ => HandleSlotHover(slotIndex, false));
+        }
+
+        /// <summary>
+        /// Clears the specified staging slot.
+        /// </summary>
+        private void ClearTransferSlot(int slotIndex)
+        {
+            var manager = ShipmentManager.Instance;
+            if (manager == null)
+                return;
+
+            if (manager.TryStageItem(_activeTransferMode, slotIndex, string.Empty, 0, out var _))
+            {
+                RefreshTransferWindow();
+            }
+        }
+
+        /// <summary>
+        /// Handles drop events from the player's inventory onto a staging slot.
+        /// </summary>
+        private void HandleSlotDrop(int slotIndex, PointerEventData eventData)
+        {
+            if (!_transferVisible)
+                return;
+
+            if (!TryResolveDraggedItem(eventData, out var itemId, out var quantity, out var displayName))
+            {
+                SetTransferStatus("Unable to read item data from the dragged object.", true);
+                return;
+            }
+
+            var manager = ShipmentManager.Instance;
+            if (manager == null)
+                return;
+
+            if (!manager.TryStageItem(_activeTransferMode, slotIndex, itemId, quantity, out var error))
+            {
+                SetTransferStatus(string.IsNullOrWhiteSpace(error) ? "Item could not be staged." : error, true);
+                return;
+            }
+
+            SetTransferStatus($"{displayName} x{quantity} staged.", false);
+            RefreshTransferWindow();
+        }
+
+        /// <summary>
+        /// Handles pointer clicks, allowing right-click to clear a slot quickly.
+        /// </summary>
+        private void HandleSlotClick(int slotIndex, PointerEventData eventData)
+        {
+            if (eventData.button == PointerEventData.InputButton.Right)
+            {
+                ClearTransferSlot(slotIndex);
+            }
+        }
+
+        /// <summary>
+        /// Handles pointer enter/exit for slot highlighting.
+        /// </summary>
+        private void HandleSlotHover(int slotIndex, bool isHover)
+        {
+            if (slotIndex < 0 || slotIndex >= _transferSlots.Count)
+                return;
+
+            var view = _transferSlots[slotIndex];
+            if (isHover)
+            {
+                view.Highlight();
+            }
+            else
+            {
+                var manager = ShipmentManager.Instance;
+                var slot = manager != null ? manager.GetPendingSlot(_activeTransferMode, slotIndex) : PendingItemSlot.Empty();
+                view.Restore(slot);
+            }
+        }
+
+        /// <summary>
+        /// Attempts to resolve item metadata from the supplied drag event.
+        /// </summary>
+        private bool TryResolveDraggedItem(PointerEventData eventData, out string itemId, out int quantity, out string displayName)
+        {
+            itemId = string.Empty;
+            quantity = 0;
+            displayName = string.Empty;
+
+            if (eventData == null)
+                return false;
+
+            if (eventData.pointerDrag != null && TryResolveFromGameObject(eventData.pointerDrag, out itemId, out quantity, out displayName))
+                return true;
+
+            if (eventData.pointerPress != null && TryResolveFromGameObject(eventData.pointerPress, out itemId, out quantity, out displayName))
+                return true;
+
+            return false;
+        }
+
+        /// <summary>
+        /// Scans a GameObject's components for recognizable inventory data.
+        /// </summary>
+        private bool TryResolveFromGameObject(GameObject source, out string itemId, out int quantity, out string displayName)
+        {
+            itemId = string.Empty;
+            quantity = 0;
+            displayName = string.Empty;
+
+            if (source == null)
+                return false;
+
+            var components = source.GetComponents<Component>();
+            foreach (var component in components)
+            {
+                if (component == null)
+                    continue;
+
+                if (TryResolveFromObject(component, 0, out itemId, out quantity, out displayName))
+                    return true;
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// Uses reflection heuristics to extract item information from an arbitrary object.
+        /// </summary>
+        private bool TryResolveFromObject(object instance, int depth, out string itemId, out int quantity, out string displayName)
+        {
+            itemId = string.Empty;
+            quantity = 0;
+            displayName = string.Empty;
+
+            if (instance == null || depth > 4)
+                return false;
+
+            var type = instance.GetType();
+            string typeName = type.FullName ?? type.Name;
+
+            if (typeName.IndexOf("ItemDefinition", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                itemId = TryGetMemberValue(instance, "ID", "Id", "Guid", "GUID")?.ToString() ?? string.Empty;
+                displayName = TryGetMemberValue(instance, "Name", "DisplayName")?.ToString() ?? itemId;
+                quantity = ExtractInt(TryGetMemberValue(instance, "Quantity", "StackLimit"), 1);
+                return !string.IsNullOrEmpty(itemId);
+            }
+
+            if (typeName.IndexOf("ItemInstance", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                typeName.IndexOf("ProductInstance", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                var def = TryGetMemberValue(instance, "Definition", "ItemDefinition", "Def");
+                if (def != null && TryResolveFromObject(def, depth + 1, out itemId, out quantity, out displayName))
+                {
+                    int stack = ExtractInt(TryGetMemberValue(instance, "Quantity", "Stack", "Amount", "count"), quantity);
+                    quantity = Math.Max(stack, 1);
+                    return true;
+                }
+            }
+
+            if (typeName.IndexOf("Slot", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                var slotItem = TryGetMemberValue(instance, "ItemInstance", "Item", "ProductInstance", "CurrentItem");
+                if (slotItem != null && TryResolveFromObject(slotItem, depth + 1, out itemId, out quantity, out displayName))
+                {
+                    int slotQuantity = ExtractInt(TryGetMemberValue(instance, "Quantity", "Stack", "Amount", "count"), quantity);
+                    quantity = Math.Max(slotQuantity, 1);
+                    return true;
+                }
+            }
+
+            foreach (var key in new[] { "ItemInstance", "Item", "Slot", "SourceSlot", "TargetSlot", "Payload", "Data" })
+            {
+                var nested = TryGetMemberValue(instance, key);
+                if (nested != null && TryResolveFromObject(nested, depth + 1, out itemId, out quantity, out displayName))
+                    return true;
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// Helper to read field/property values via reflection.
+        /// </summary>
+        private static object? TryGetMemberValue(object instance, params string[] memberNames)
+        {
+            var type = instance.GetType();
+            foreach (var name in memberNames)
+            {
+                var field = type.GetField(name, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                if (field != null)
+                {
+                    try
+                    {
+                        return field.GetValue(instance);
+                    }
+                    catch (Exception)
+                    {
+                        // Ignore and continue probing other members
+                    }
+                }
+
+                var prop = type.GetProperty(name, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                if (prop != null && prop.GetIndexParameters().Length == 0)
+                {
+                    try
+                    {
+                        return prop.GetValue(instance);
+                    }
+                    catch (Exception)
+                    {
+                        // Ignore and continue probing other members
+                    }
+                }
+            }
+
+            return null;
+        }
+
+        /// <summary>
+        /// Converts a boxed numeric value into an int with a safe fallback.
+        /// </summary>
+        private static int ExtractInt(object? value, int fallback = 0)
+        {
+            if (value == null)
+                return fallback;
+
+            switch (value)
+            {
+                case int i:
+                    return i;
+                case float f:
+                    return (int)Math.Round(f);
+                case double d:
+                    return (int)Math.Round(d);
+                case long l:
+                    return (int)l;
+            }
+
+            if (int.TryParse(value.ToString(), out var parsed))
+                return parsed;
+
+            return fallback;
+        }
+
+        /// <summary>
+        /// Updates transfer status text and styling.
+        /// </summary>
+        private void SetTransferStatus(string message, bool isError)
+        {
+            if (_transferStatusText == null)
+                return;
+
+            if (string.IsNullOrWhiteSpace(message))
+            {
+                _transferStatusText.text = string.Empty;
+                _transferStatusText.color = DockExportsConfig.Text;
+                return;
+            }
+
+            _transferStatusText.text = message;
+            _transferStatusText.color = isError ? DockExportsConfig.Warning : DockExportsConfig.Success;
+        }
+
+        /// <summary>
+        /// Enables or disables the confirm button.
+        /// </summary>
+        private void UpdateConfirmButtonState(bool enabled)
+        {
+            if (_transferConfirmButton != null)
+                _transferConfirmButton.interactable = enabled;
+        }
+
+        /// <summary>
+        /// Attempts to finalize the staged shipment via the mod backend.
+        /// </summary>
+        private void HandleTransferConfirmation()
+        {
+            var manager = ShipmentManager.Instance;
+            if (manager == null)
+                return;
+
+            if (!manager.TryCalculatePendingShipment(_activeTransferMode, out var calculation, out var validationError))
+            {
+                SetTransferStatus(string.IsNullOrWhiteSpace(validationError) ? "Staged items are invalid." : validationError, true);
+                return;
+            }
+
+            if (!Mod.TryConfirmPendingShipment(_activeTransferMode, out calculation, out var error))
+            {
+                if (!string.IsNullOrWhiteSpace(error))
+                    SetTransferStatus(error, true);
+                else
+                    SetTransferStatus("Shipment confirmation failed.", true);
+                RefreshTransferWindow();
+                return;
+            }
+
+            SetTransferStatus("Shipment confirmed. Broker will handle the paperwork.", false);
+            HideTransferWindow();
+            RefreshCreatePanel();
+            RefreshActivePanel();
+            RefreshHistoryPanel();
+        }
+
+        #endregion
+
         #region Create Tab
 
         /// <summary>
@@ -726,7 +1354,7 @@ namespace S1DockExports
         /// Color changes based on status: <see cref="DockExportsConfig.Success"/> (green) when available,
         /// <see cref="DockExportsConfig.Warning"/> (orange) when on cooldown.
         /// </remarks>
-        private Text _wholesaleCooldownText;
+        private Text _wholesaleCooldownText = null!;
 
         /// <summary>
         /// Builds the Create tab UI (shipment creation buttons).
@@ -735,15 +1363,10 @@ namespace S1DockExports
         /// <remarks>
         /// <para><strong>Create Tab Contents:</strong></para>
         /// <list type="bullet">
-        /// <item><strong>Wholesale Section:</strong> Description, cooldown status text, "Ship Wholesale x100" button</item>
-        /// <item><strong>Consignment Section:</strong> Description, details, "Ship Consignment x200" button</item>
-        /// <item><strong>Help Note:</strong> Disclaimer that these are debug buttons with fixed quantities</item>
+        /// <item><strong>Wholesale Section:</strong> Description, cooldown status text, and a button that opens the staging window</item>
+        /// <item><strong>Consignment Section:</strong> Description, payout details, and a staging button</item>
+        /// <item><strong>Help Note:</strong> Instruction to drag inventory bricks into staging slots</item>
         /// </list>
-        /// <para><strong>Debug Buttons:</strong></para>
-        /// <para>
-        /// Currently uses <c>DebugCreateWholesale(100)</c> and <c>DebugCreateConsignment(200)</c>
-        /// with hardcoded quantities. Full UI (with input fields for custom quantities) is planned.
-        /// </para>
         /// <para><strong>Cooldown Status:</strong></para>
         /// <para>
         /// <see cref="_wholesaleCooldownText"/> is initialized here and updated by <see cref="RefreshCreatePanel"/>.
@@ -765,11 +1388,11 @@ namespace S1DockExports
             _wholesaleCooldownText = UIFactory.Text("Wholesale_Cooldown", "Checking availability...",
                 wholesaleSection.transform, 13, TextAnchor.MiddleLeft).GetComponent<Text>();
 
-            var wholesaleBtn = UIFactory.RoundedButtonWithLabel("Wholesale_Btn", "Ship Wholesale x100", wholesaleSection.transform,
+            var wholesaleBtn = UIFactory.RoundedButtonWithLabel("Wholesale_Btn", "Stage Wholesale", wholesaleSection.transform,
                 DockExportsConfig.Accent, 200, 40, 14, Color.white);
-            ButtonUtils.AddListener(wholesaleBtn.Item2, () => {
-                Mod.DebugCreateWholesale(100);
-                RefreshCreatePanel();
+            ButtonUtils.AddListener(wholesaleBtn.Item2, () =>
+            {
+                ShowTransferWindow(ShipmentType.Wholesale);
             });
 
             // Consignment section
@@ -780,14 +1403,14 @@ namespace S1DockExports
             UIFactory.Text("Consignment_Details", $"Cap: {DockExportsConfig.CONSIGNMENT_CAP} bricks | {DockExportsConfig.CONSIGNMENT_INSTALLMENTS} weekly payments",
                 consignmentSection.transform, 12, TextAnchor.MiddleLeft);
 
-            var consignmentBtn = UIFactory.RoundedButtonWithLabel("Consignment_Btn", "Ship Consignment x200", consignmentSection.transform,
+            var consignmentBtn = UIFactory.RoundedButtonWithLabel("Consignment_Btn", "Stage Consignment", consignmentSection.transform,
                 DockExportsConfig.Accent, 200, 40, 14, Color.white);
-            ButtonUtils.AddListener(consignmentBtn.Item2, () => {
-                Mod.DebugCreateConsignment(200);
-                RefreshCreatePanel();
+            ButtonUtils.AddListener(consignmentBtn.Item2, () =>
+            {
+                ShowTransferWindow(ShipmentType.Consignment);
             });
 
-            UIFactory.Text("Create_Help", "Note: These are debug buttons with fixed quantities. Full UI coming soon.",
+            UIFactory.Text("Create_Help", "Use the staging window to drag bricks into slots before confirming the shipment.",
                 parent, 11, TextAnchor.UpperLeft);
         }
 
@@ -860,7 +1483,7 @@ namespace S1DockExports
         /// Updated by <see cref="RefreshActivePanel"/> to show current shipment info or "No active shipment."
         /// if no shipment is active.
         /// </remarks>
-        private Text _activeText;
+        private Text _activeText = null!;
 
         /// <summary>
         /// Builds the Active tab UI (current shipment status display).
@@ -934,7 +1557,7 @@ namespace S1DockExports
         /// Updated by <see cref="RefreshHistoryPanel"/> to show completed shipments or "No history."
         /// if no shipments have been completed.
         /// </remarks>
-        private Text _historyText;
+        private Text _historyText = null!;
 
         /// <summary>
         /// Builds the History tab UI (completed shipments log).
@@ -993,5 +1616,42 @@ namespace S1DockExports
         }
 
         #endregion
+
+        /// <summary>
+        /// Lightweight view-model for a staging slot. Stores UI references and applies styling.
+        /// </summary>
+        private sealed class TransferSlotView
+        {
+            private readonly Image _background;
+            private readonly Text _nameText;
+            private readonly Text _quantityText;
+            private readonly Button _clearButton;
+
+            public TransferSlotView(Image background, Text nameText, Text quantityText, Button clearButton)
+            {
+                _background = background;
+                _nameText = nameText;
+                _quantityText = quantityText;
+                _clearButton = clearButton;
+            }
+
+            public void Update(PendingItemSlot slot)
+            {
+                _nameText.text = slot.IsEmpty ? "Empty" : (string.IsNullOrWhiteSpace(slot.DisplayName) ? slot.ItemId : slot.DisplayName);
+                _quantityText.text = slot.IsEmpty ? "—" : $"{slot.Quantity}x";
+                _background.color = slot.IsEmpty ? TransferSlotIdleColor : TransferSlotFilledColor;
+                _clearButton.interactable = !slot.IsEmpty;
+            }
+
+            public void Highlight()
+            {
+                _background.color = TransferSlotHighlightColor;
+            }
+
+            public void Restore(PendingItemSlot slot)
+            {
+                _background.color = slot.IsEmpty ? TransferSlotIdleColor : TransferSlotFilledColor;
+            }
+        }
     }
 }
