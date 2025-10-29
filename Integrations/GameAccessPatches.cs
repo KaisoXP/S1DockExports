@@ -40,6 +40,8 @@
 /// </remarks>
 using HarmonyLib;
 using System;
+using System.Collections;
+using System.Reflection;
 using MelonLoader;
 
 #if IL2CPP
@@ -148,11 +150,26 @@ namespace S1DockExports.Integrations
         {
             try
             {
-                if (NetworkSingleton<LevelManager>.InstanceExists)
-                {
-                    var levelManager = NetworkSingleton<LevelManager>.Instance;
-                    return (int)levelManager.Rank;
-                }
+                if (!NetworkSingleton<LevelManager>.InstanceExists)
+                    return 0;
+
+                var levelManager = NetworkSingleton<LevelManager>.Instance;
+
+                // Prefer explicit player level values
+                int? level = TryGetInt(levelManager, "CurrentLevel", "Level", "PlayerLevel", "RankLevel", "TotalLevel");
+                if (level.HasValue && level.Value > 0)
+                    return level.Value;
+
+                // Attempt parameterless getter methods (naming differs between builds)
+                level = TryInvokeInt(levelManager, "GetCurrentLevel", "GetLevel", "GetPlayerLevel");
+                if (level.HasValue && level.Value > 0)
+                    return level.Value;
+
+                // Fall back to enum-based rank (may be coarse-grained, but better than zero)
+                level = TryGetInt(levelManager, "Rank");
+                if (level.HasValue)
+                    return level.Value;
+
                 return 0;
             }
             catch (Exception ex)
@@ -166,38 +183,70 @@ namespace S1DockExports.Integrations
         /// Checks if the player owns a property by name.
         /// </summary>
         /// <param name="propertyName">Property name (e.g., "Docks Warehouse")</param>
-        /// <returns>Always false (NOT IMPLEMENTED - use debug unlock instead)</returns>
+        /// <returns><c>true</c> if the player owns the property; otherwise <c>false</c></returns>
         /// <remarks>
         /// <para><strong>Replaces:</strong> <c>S1API.Property.PropertyManager.FindPropertyByName().IsOwned</c></para>
-        /// <para><strong>S1API Issue:</strong> PropertyManager API not yet implemented</para>
-        /// <para><strong>⚠️ NOT IMPLEMENTED:</strong></para>
         /// <para>
-        /// PropertyManager is NOT a NetworkSingleton in the game. The correct property ownership
-        /// API has not been found in Assembly-CSharp yet. This method is a placeholder.
-        /// </para>
-        /// <para><strong>Workaround:</strong></para>
-        /// <para>
-        /// Use the debug unlock button in the phone app to bypass this requirement.
-        /// </para>
-        /// <para><strong>TODO:</strong></para>
-        /// <para>
-        /// Research Schedule I's property system to find the correct API for checking ownership.
-        /// Likely involves finding a PropertyManager instance or static method.
+        /// Uses reflection to query the underlying PropertyManager singleton directly, ensuring compatibility
+        /// even when S1API facades are out of sync with the current game build.
         /// </para>
         /// </remarks>
         /// <example>
-        /// Current usage (always returns false):
         /// <code>
         /// bool ownsDocks = GameAccess.IsPropertyOwned("Docks Warehouse");
-        /// // Always false - property check not implemented
+        /// if (ownsDocks)
+        /// {
+        ///     UnlockBroker();
+        /// }
         /// </code>
         /// </example>
         public static bool IsPropertyOwned(string propertyName)
         {
-            // TODO: Implement actual property checking
-            // For now, return false so unlock requires debug button
-            // Once we find the correct Property API in Assembly-CSharp, we can implement this
-            MelonLogger.Warning($"[DockExports] IsPropertyOwned('{propertyName}') - NOT IMPLEMENTED: returning false (use debug unlock)");
+            if (string.IsNullOrWhiteSpace(propertyName))
+                return false;
+
+            try
+            {
+                if (!NetworkSingleton<PropertyManager>.InstanceExists)
+                {
+                    MelonLogger.Warning("[DockExports] PropertyManager singleton missing; cannot verify ownership.");
+                    return false;
+                }
+
+                var manager = NetworkSingleton<PropertyManager>.Instance;
+                string normalized = propertyName.Trim();
+
+                object? property = TryInvokePropertyLookup(manager, normalized)
+                                   ?? FindPropertyByEnumeration(manager, normalized);
+
+                if (property == null)
+                {
+                    MelonLogger.Warning($"[DockExports] Property '{normalized}' not found.");
+                    return false;
+                }
+
+                bool? owned = TryGetBool(property, "IsOwned", "Owned", "IsPurchased", "OwnedByPlayer", "IsOwnedByPlayer");
+                if (owned.HasValue)
+                    return owned.Value;
+
+                var ownerValue = GetMemberValue(property, "OwnerId") ?? GetMemberValue(property, "Owner");
+                if (ownerValue != null)
+                {
+                    if (ownerValue is string ownerString)
+                        return !string.IsNullOrEmpty(ownerString);
+                    if (ownerValue is int ownerInt)
+                        return ownerInt != 0;
+                    if (ownerValue is Enum ownerEnum)
+                        return Convert.ToInt32(ownerEnum) != 0;
+                }
+
+                MelonLogger.Warning($"[DockExports] Unable to determine ownership for property '{normalized}'. Assuming not owned.");
+            }
+            catch (Exception ex)
+            {
+                MelonLogger.Error($"[DockExports] Failed to check property ownership for '{propertyName}': {ex.Message}");
+            }
+
             return false;
         }
 
@@ -345,5 +394,231 @@ namespace S1DockExports.Integrations
             // For now, return configured default
             return DockExportsConfig.DEFAULT_BRICK_PRICE;
         }
+
+        #region Reflection helpers
+
+        private static int? TryInvokeInt(object instance, params string[] methodNames)
+        {
+            foreach (var name in methodNames)
+            {
+                if (string.IsNullOrWhiteSpace(name))
+                    continue;
+
+                try
+                {
+                    var method = instance.GetType().GetMethod(name, BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase, Type.DefaultBinder, Type.EmptyTypes, null);
+                    if (method == null)
+                        continue;
+
+                    var result = method.Invoke(instance, Array.Empty<object>());
+                    var converted = ConvertToNullableInt(result);
+                    if (converted.HasValue)
+                        return converted;
+                }
+                catch (Exception ex)
+                {
+                    MelonLogger.Warning($"[DockExports] Failed invoking '{name}': {ex.Message}");
+                }
+            }
+
+            return null;
+        }
+
+        private static int? TryGetInt(object instance, params string[] memberNames)
+        {
+            foreach (var member in memberNames)
+            {
+                if (string.IsNullOrWhiteSpace(member))
+                    continue;
+
+                var value = GetMemberValue(instance, member);
+                var converted = ConvertToNullableInt(value);
+                if (converted.HasValue)
+                    return converted;
+            }
+            return null;
+        }
+
+        private static bool? TryGetBool(object instance, params string[] memberNames)
+        {
+            foreach (var member in memberNames)
+            {
+                if (string.IsNullOrWhiteSpace(member))
+                    continue;
+
+                var value = GetMemberValue(instance, member);
+                var converted = ConvertToNullableBool(value);
+                if (converted.HasValue)
+                    return converted;
+            }
+            return null;
+        }
+
+        private static string? TryGetString(object instance, params string[] memberNames)
+        {
+            foreach (var member in memberNames)
+            {
+                if (string.IsNullOrWhiteSpace(member))
+                    continue;
+
+                var value = GetMemberValue(instance, member);
+                if (value != null)
+                    return value.ToString();
+            }
+            return null;
+        }
+
+        private static object? GetMemberValue(object instance, string memberName)
+        {
+            if (instance == null || string.IsNullOrWhiteSpace(memberName))
+                return null;
+
+            try
+            {
+                var type = instance.GetType();
+
+                var property = type.GetProperty(memberName, BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase);
+                if (property != null)
+                    return property.GetValue(instance);
+
+                var field = type.GetField(memberName, BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase);
+                if (field != null)
+                    return field.GetValue(instance);
+            }
+            catch (Exception ex)
+            {
+                MelonLogger.Warning($"[DockExports] Reflection read failed for '{memberName}': {ex.Message}");
+            }
+
+            return null;
+        }
+
+        private static int? ConvertToNullableInt(object? value)
+        {
+            if (value == null)
+                return null;
+
+            switch (value)
+            {
+                case int i:
+                    return i;
+                case long l:
+                    return (int)l;
+                case short s:
+                    return s;
+                case byte b:
+                    return b;
+                case float f:
+                    return (int)f;
+                case double d:
+                    return (int)d;
+                case Enum e:
+                    return Convert.ToInt32(e);
+            }
+
+            if (int.TryParse(value.ToString(), out int parsed))
+                return parsed;
+
+            return null;
+        }
+
+        private static bool? ConvertToNullableBool(object? value)
+        {
+            if (value == null)
+                return null;
+
+            switch (value)
+            {
+                case bool b:
+                    return b;
+                case int i:
+                    return i != 0;
+                case long l:
+                    return l != 0;
+                case Enum e:
+                    return Convert.ToInt32(e) != 0;
+            }
+
+            if (bool.TryParse(value.ToString(), out bool parsed))
+                return parsed;
+
+            return null;
+        }
+
+        private static object? TryInvokePropertyLookup(object manager, string propertyName)
+        {
+            var lookup = manager.GetType().GetMethod("FindPropertyByName", BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase)
+                         ?? manager.GetType().GetMethod("GetPropertyByName", BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase);
+
+            if (lookup == null)
+                return null;
+
+            try
+            {
+                return lookup.Invoke(manager, new object[] { propertyName });
+            }
+            catch (Exception ex)
+            {
+                MelonLogger.Warning($"[DockExports] Property lookup for '{propertyName}' failed: {ex.Message}");
+                return null;
+            }
+        }
+
+        private static object? FindPropertyByEnumeration(object manager, string propertyName)
+        {
+            var collection = GetMemberValue(manager, "AllProperties")
+                           ?? GetMemberValue(manager, "Properties")
+                           ?? GetMemberValue(manager, "PropertyDefinitions");
+
+            foreach (var candidate in EnumerateCollection(collection))
+            {
+                string? name = TryGetString(candidate, "PropertyName", "Name", "DisplayName", "Title", "InternalName");
+                if (string.IsNullOrEmpty(name))
+                    continue;
+
+                if (string.Equals(name, propertyName, StringComparison.OrdinalIgnoreCase))
+                    return candidate;
+            }
+
+            return null;
+        }
+
+        private static IEnumerable EnumerateCollection(object? collection)
+        {
+            if (collection == null)
+                yield break;
+
+            if (collection is IEnumerable enumerable)
+            {
+                foreach (var item in enumerable)
+                    if (item != null)
+                        yield return item;
+                yield break;
+            }
+
+            var type = collection.GetType();
+            var getEnumerator = type.GetMethod("GetEnumerator", BindingFlags.Public | BindingFlags.Instance);
+            if (getEnumerator == null)
+                yield break;
+
+            var enumerator = getEnumerator.Invoke(collection, Array.Empty<object>());
+            if (enumerator == null)
+                yield break;
+
+            var enumeratorType = enumerator.GetType();
+            var moveNext = enumeratorType.GetMethod("MoveNext", BindingFlags.Public | BindingFlags.Instance);
+            var currentProperty = enumeratorType.GetProperty("Current", BindingFlags.Public | BindingFlags.Instance);
+            if (moveNext == null || currentProperty == null)
+                yield break;
+
+            while (moveNext.Invoke(enumerator, Array.Empty<object>()) is bool hasNext && hasNext)
+            {
+                var current = currentProperty.GetValue(enumerator);
+                if (current != null)
+                    yield return current;
+            }
+        }
+
+        #endregion
     }
 }

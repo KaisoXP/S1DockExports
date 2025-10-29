@@ -147,14 +147,9 @@ namespace S1DockExports
         /// <summary>
         /// Called very early in the game's startup, before game systems are initialized.
         /// </summary>
-        /// <remarks>
-        /// NuGet S1API.Forked v2.4.2 doesn't have PhoneAppManager auto-discovery.
-        /// Phone app icon is injected via Harmony patch on HomeScreen.Start().
-        /// </remarks>
         public override void OnApplicationStart()
         {
-            // Phone app icon will be injected via PhoneAppInjector Harmony patch
-            MelonLogger.Msg("[DockExports] 📱 DockExportsApp ready for Harmony icon injection");
+            MelonLogger.Msg("[DockExports] 📱 Phone app registration ready (S1API handles icon + lifecycle)");
         }
 
         /// <summary>
@@ -166,7 +161,7 @@ namespace S1DockExports
         /// <para><strong>Scene Flow:</strong></para>
         /// <list type="bullet">
         /// <item>"Menu" → Main menu (clear data to prevent cross-save issues)</item>
-        /// <item>"Main" → In-game (phone app injection happens here via Harmony)</item>
+        /// <item>"Main" → In-game scene (phone app available once unlocked)</item>
         /// </list>
         /// <para>
         /// <strong>Why clear data on Menu scene?</strong>
@@ -178,18 +173,11 @@ namespace S1DockExports
         {
             MelonLogger.Msg($"[DockExports] 🗺️ Scene initialized: {sceneName} (index: {buildIndex})");
 
-            // Phone app injection happens via Harmony patch when HomeScreen.Start() is called
-            if (sceneName == "Main")
-            {
-                MelonLogger.Msg("[DockExports] 📱 Main scene loaded, phone app will inject automatically");
-            }
-
             // Clear shipment data when returning to menu to prevent cross-save contamination
             if (sceneName == "Menu")
             {
                 MelonLogger.Msg("[DockExports] Clearing data for menu scene");
                 ShipmentManager.Instance.ClearAllData();
-                PhoneAppInjector.ResetInjection();
                 brokerUnlocked = false;
             }
         }
@@ -247,10 +235,10 @@ namespace S1DockExports
                 // Log unlock check every second to avoid spam
                 if (Time.time - _lastUnlockCheckLog >= 1.0f)
                 {
-                    int rank = GameAccess.GetPlayerRank();
+                    int playerLevel = GameAccess.GetPlayerRank();
                     bool docksOwned = GameAccess.IsPropertyOwned(DockExportsConfig.DOCKS_PROPERTY_ID);
 
-                    MelonLogger.Msg($"[DockExports] Unlock check: Rank={rank}, DocksOwned={docksOwned}");
+                    MelonLogger.Msg($"[DockExports] Unlock check: Level={playerLevel}, DocksOwned={docksOwned}");
                     _lastUnlockCheckLog = Time.time;
                 }
 
@@ -271,36 +259,30 @@ namespace S1DockExports
         /// Checks if the player meets unlock requirements (Hustler rank + Docks property ownership).
         /// </summary>
         /// <returns>
-        /// <c>true</c> if player has Rank 3+ (Hustler) AND owns the Docks property; otherwise, <c>false</c>.
+        /// <c>true</c> if player has reached the required broker level and owns the Docks property; otherwise, <c>false</c>.
         /// </returns>
         /// <remarks>
         /// <para><strong>Unlock Requirements:</strong></para>
         /// <list type="number">
-        /// <item>Player rank >= 3 (Hustler)</item>
+        /// <item>Player level ≥ <see cref="DockExportsConfig.REQUIRED_RANK_LEVEL"/> (Hustler III)</item>
         /// <item>Player owns "Docks Warehouse" property</item>
         /// </list>
-        /// <para>
-        /// Uses <see cref="GameAccess"/> for direct game system access since S1API managers
-        /// have known issues with NetworkSingleton types.
-        /// </para>
         /// </remarks>
         private bool CanUnlock()
         {
-            // Check rank requirement using direct game access
-            int currentRank = GameAccess.GetPlayerRank();
-            bool rankOk = currentRank >= 3; // Hustler = rank 3
+            int requiredLevel = DockExportsConfig.REQUIRED_RANK_LEVEL;
+            int playerLevel = GameAccess.GetPlayerRank();
+            bool levelOk = playerLevel >= requiredLevel;
 
-            if (!rankOk)
+            if (!levelOk)
             {
-                // Only log rank failure occasionally to reduce spam
                 if (Time.time - _lastUnlockCheckLog >= 5.0f)
                 {
-                    MelonLogger.Msg($"[DockExports] Rank check: {currentRank} >= 3 (Hustler)? {rankOk}");
+                    MelonLogger.Msg($"[DockExports] Level check: {playerLevel} / {requiredLevel} (needs Hustler III+)");
                 }
                 return false;
             }
 
-            // Check property ownership using direct game access
             bool propertyOwned = GameAccess.IsPropertyOwned(DockExportsConfig.DOCKS_PROPERTY_ID);
 
             if (!propertyOwned && Time.time - _lastUnlockCheckLog >= 5.0f)
@@ -369,7 +351,9 @@ namespace S1DockExports
             MelonLogger.Msg("[DockExports] Sending broker intro SMS...");
             SendBrokerMessage(BrokerMessages.INTRO_SMS);
 
-            // TODO: Notify phone app to rebuild UI once we have phone app working
+            DockExportsApp.OnBrokerUnlocked();
+            DockExportsApp.RefreshData();
+
             MelonLogger.Msg("[DockExports] ✓ Broker unlock complete");
         }
 
@@ -465,17 +449,23 @@ namespace S1DockExports
 
             MelonLogger.Msg($"[DockExports] 💰 Processing Friday consignment payout: Week {weekNumber}/{totalWeeks}");
 
-            int actualPayout = ShipmentManager.Instance.ProcessConsignmentPayment(out int lossPercent);
-            int currentDay = GameAccess.GetElapsedDays();
             int expectedPayout = (shipment?.TotalValue ?? 0) / DockExportsConfig.CONSIGNMENT_INSTALLMENTS;
+            int actualPayout = ShipmentManager.Instance.ProcessConsignmentPayment(out int lossPercent, out int floorTopUp);
+            int currentDay = GameAccess.GetElapsedDays();
+            int basePayout = actualPayout - floorTopUp;
 
             if (lossPercent > 0)
             {
-                MelonLogger.Warning($"[DockExports] ⚠️ Loss event: {lossPercent}% loss, payout: ${actualPayout:N0} (expected: ${expectedPayout:N0})");
+                MelonLogger.Warning($"[DockExports] ⚠️ Loss event: {lossPercent}% loss, payout: ${basePayout:N0} (expected: ${expectedPayout:N0})");
             }
             else
             {
-                MelonLogger.Msg($"[DockExports] ✓ No losses, payout: ${actualPayout:N0}");
+                MelonLogger.Msg($"[DockExports] ✓ No losses, payout: ${basePayout:N0}");
+            }
+
+            if (floorTopUp > 0)
+            {
+                MelonLogger.Msg($"[DockExports] 🔄 Floor protection applied: broker topped up ${floorTopUp:N0} to reach wholesale floor.");
             }
 
             // Record that we've processed this day
@@ -484,12 +474,19 @@ namespace S1DockExports
             // Add money to player
             AddMoneyToPlayer(actualPayout);
 
-            // Send broker notification
+            // Send broker notification(s)
             string message = lossPercent > 0
-                ? BrokerMessages.GetRandomLossMessage(weekNumber, lossPercent, actualPayout, expectedPayout)
-                : BrokerMessages.WeekCleared(weekNumber, actualPayout);
+                ? BrokerMessages.GetRandomLossMessage(weekNumber, lossPercent, basePayout, expectedPayout)
+                : BrokerMessages.WeekCleared(weekNumber, basePayout);
 
             SendBrokerMessage(message);
+
+            if (floorTopUp > 0)
+            {
+                SendBrokerMessage(BrokerMessages.FloorProtection(floorTopUp));
+            }
+
+            DockExportsApp.RefreshData();
 
             // Request game save
             MelonLogger.Msg("[DockExports] 💾 Requesting game save");
@@ -591,13 +588,12 @@ namespace S1DockExports
                 ShipmentManager.Instance.CreateWholesaleShipment(quantity, brickPrice, currentDay);
                 MelonLogger.Msg("[DockExports] ✓ Wholesale shipment created, processing instant payment");
 
-                ShipmentManager.Instance.ProcessWholesalePayment(currentDay);
+                int payout = ShipmentManager.Instance.ProcessWholesalePayment(currentDay);
+                MelonLogger.Msg($"[DockExports] ✓ Wholesale complete, total paid: ${payout:N0}");
 
-                int totalPaid = ShipmentManager.Instance.ActiveShipment?.TotalPaid ?? 0;
-                MelonLogger.Msg($"[DockExports] ✓ Wholesale complete, total paid: ${totalPaid:N0}");
-
-                AddMoneyToPlayer(totalPaid);
-                SendBrokerMessage(BrokerMessages.WholesaleConfirmed(quantity, totalPaid));
+                AddMoneyToPlayer(payout);
+                SendBrokerMessage(BrokerMessages.WholesaleConfirmed(quantity, payout));
+                DockExportsApp.RefreshData();
 
                 MelonLogger.Msg("[DockExports] 💾 Requesting game save");
                 Saveable.RequestGameSave(true);
@@ -669,6 +665,8 @@ namespace S1DockExports
                         shipment.Value.TotalValue
                     ));
                 }
+
+                DockExportsApp.RefreshData();
 
                 MelonLogger.Msg("[DockExports] 💾 Requesting game save");
                 Saveable.RequestGameSave(true);

@@ -105,9 +105,9 @@ namespace S1DockExports
     public class DockExportsApp : PhoneApp
     {
         /// <summary>
-        /// Reference to the main mod instance for accessing shipment data and methods.
+        /// Convenience accessor for the mod instance. Throws if mod not initialized.
         /// </summary>
-        private readonly DockExportsMod _mod;
+        private DockExportsMod Mod => DockExportsMod.Instance ?? throw new InvalidOperationException("DockExportsMod instance not ready");
 
         /// <summary>
         /// Static singleton instance for event callbacks from outside the app.
@@ -121,21 +121,6 @@ namespace S1DockExports
         /// Root UI container GameObject, stored for rebuilding UI when unlock state changes.
         /// </summary>
         private GameObject? _rootContainer;
-
-        /// <summary>
-        /// Initializes a new instance of the <see cref="DockExportsApp"/> class.
-        /// </summary>
-        /// <param name="mod">Reference to the main mod instance</param>
-        /// <remarks>
-        /// Stores the mod reference and registers this instance as the singleton.
-        /// The singleton pattern allows <see cref="OnBrokerUnlocked"/> to be called
-        /// from external code (e.g., DockExportsMod) to trigger UI rebuilds.
-        /// </remarks>
-        public DockExportsApp(DockExportsMod mod)
-        {
-            _mod = mod;
-            _instance = this;
-        }
 
         /// <summary>
         /// Internal app identifier (must be unique across all phone apps).
@@ -207,6 +192,7 @@ namespace S1DockExports
         /// </remarks>
         protected override void OnCreated()
         {
+            _instance = this;
             MelonLoader.MelonLogger.Msg("[DockExports] 📱 Phone app OnCreated, subscribing to events");
 
             // Subscribe to shipments loaded event to refresh UI when save data is loaded
@@ -247,6 +233,11 @@ namespace S1DockExports
             MelonLoader.MelonLogger.Msg("[DockExports] 📱 Phone app OnDestroyed, cleaning up");
             // Unsubscribe from events
             ShipmentManager.OnShipmentsLoaded -= OnShipmentsLoaded;
+
+            if (_instance == this)
+            {
+                _instance = null;
+            }
         }
 
         /// <summary>
@@ -321,6 +312,14 @@ namespace S1DockExports
         }
 
         /// <summary>
+        /// Static helper invoked by the mod when shipment data changes.
+        /// </summary>
+        internal static void RefreshData()
+        {
+            _instance?.RefreshAllPanels();
+        }
+
+        /// <summary>
         /// Completely rebuilds the phone app UI (used when unlock state changes).
         /// </summary>
         /// <remarks>
@@ -328,7 +327,7 @@ namespace S1DockExports
         /// <list type="number">
         /// <item>Clear all existing UI children from <see cref="_rootContainer"/></item>
         /// <item>Call <see cref="OnCreatedUI"/> with the same container to rebuild from scratch</item>
-        /// <item><see cref="OnCreatedUI"/> checks <c>_mod.BrokerUnlocked</c> and builds appropriate UI (lock screen vs full interface)</item>
+        /// <item><see cref="OnCreatedUI"/> checks <c>DockExportsMod.Instance?.BrokerUnlocked</c> and builds appropriate UI (lock screen vs full interface)</item>
         /// </list>
         /// <para><strong>Why Full Rebuild Instead of Toggling Visibility?</strong></para>
         /// <para>
@@ -374,6 +373,16 @@ namespace S1DockExports
         }
 
         /// <summary>
+        /// Refreshes create/active/history panels, guarding against uninitialized UI elements.
+        /// </summary>
+        private void RefreshAllPanels()
+        {
+            RefreshCreatePanel();
+            RefreshActivePanel();
+            RefreshHistoryPanel();
+        }
+
+        /// <summary>
         /// Event handler called when <see cref="ShipmentManager"/> finishes loading shipment data from save file.
         /// </summary>
         /// <remarks>
@@ -398,6 +407,7 @@ namespace S1DockExports
         {
             MelonLoader.MelonLogger.Msg("[DockExports] 📱 Shipments loaded event, refreshing UI panels");
             // Refresh the UI when shipments are loaded from save data
+            RefreshCreatePanel();
             RefreshActivePanel();
             RefreshHistoryPanel();
         }
@@ -413,7 +423,7 @@ namespace S1DockExports
         /// </para>
         /// <para><strong>Conditional UI Building:</strong></para>
         /// <para>
-        /// Checks <c>_mod.BrokerUnlocked</c> to determine which UI to build:
+        /// Checks <c>DockExportsMod.Instance?.BrokerUnlocked</c> to determine which UI to build:
         /// </para>
         /// <list type="bullet">
         /// <item><strong>Locked:</strong> Shows <see cref="BuildLockScreen"/> (requirements + debug unlock button)</item>
@@ -442,7 +452,7 @@ namespace S1DockExports
         /// </remarks>
         protected override void OnCreatedUI(GameObject container)
         {
-            bool isUnlocked = _mod.BrokerUnlocked;
+            bool isUnlocked = Mod.BrokerUnlocked;
             MelonLoader.MelonLogger.Msg($"[DockExports] 📱 Building UI: unlocked={isUnlocked}");
 
             var root = UIFactory.Panel("DE_Root", container.transform, DockExportsConfig.Bg, fullAnchor: true);
@@ -583,7 +593,7 @@ namespace S1DockExports
         /// </list>
         /// <para><strong>Debug Unlock Button:</strong></para>
         /// <para>
-        /// Calls <c>_mod.DebugForceUnlock()</c> which sets <c>brokerUnlocked = true</c> and triggers
+        /// Calls <c>DockExportsMod.Instance?.DebugForceUnlock()</c> which sets <c>brokerUnlocked = true</c> and triggers
         /// <see cref="OnBrokerUnlocked"/> to rebuild the UI. This is for development testing only -
         /// in production, players must meet the actual requirements.
         /// </para>
@@ -618,7 +628,7 @@ namespace S1DockExports
 
             ButtonUtils.AddListener(debugBtn.Item2, () => {
                 MelonLoader.MelonLogger.Msg("[DockExports] 📱 Debug unlock button clicked");
-                _mod.DebugForceUnlock();
+                Mod.DebugForceUnlock();
             });
 
             MelonLoader.MelonLogger.Msg("[DockExports] ✓ Lock screen built");
@@ -758,7 +768,7 @@ namespace S1DockExports
             var wholesaleBtn = UIFactory.RoundedButtonWithLabel("Wholesale_Btn", "Ship Wholesale x100", wholesaleSection.transform,
                 DockExportsConfig.Accent, 200, 40, 14, Color.white);
             ButtonUtils.AddListener(wholesaleBtn.Item2, () => {
-                _mod.DebugCreateWholesale(100);
+                Mod.DebugCreateWholesale(100);
                 RefreshCreatePanel();
             });
 
@@ -773,7 +783,7 @@ namespace S1DockExports
             var consignmentBtn = UIFactory.RoundedButtonWithLabel("Consignment_Btn", "Ship Consignment x200", consignmentSection.transform,
                 DockExportsConfig.Accent, 200, 40, 14, Color.white);
             ButtonUtils.AddListener(consignmentBtn.Item2, () => {
-                _mod.DebugCreateConsignment(200);
+                Mod.DebugCreateConsignment(200);
                 RefreshCreatePanel();
             });
 
@@ -806,9 +816,9 @@ namespace S1DockExports
         {
             if (_wholesaleCooldownText == null) return;
 
-            if (_mod.IsWholesaleOnCooldown)
+            if (Mod.IsWholesaleOnCooldown)
             {
-                int daysRemaining = _mod.WholesaleDaysRemaining;
+                int daysRemaining = Mod.WholesaleDaysRemaining;
                 _wholesaleCooldownText.text = $"⏳ Cooldown: {daysRemaining} day{(daysRemaining != 1 ? "s" : "")} remaining";
                 _wholesaleCooldownText.color = DockExportsConfig.Warning;
             }
@@ -896,12 +906,14 @@ namespace S1DockExports
         /// </code>
         /// <para><strong>Empty State:</strong></para>
         /// <para>
-        /// If <c>_mod.Active</c> is null, displays "No active shipment."
+        /// If <c>DockExportsMod.Instance?.Active</c> is null, displays "No active shipment."
         /// </para>
         /// </remarks>
         private void RefreshActivePanel()
         {
-            var s = _mod.Active;
+            if (_activeText == null) return;
+
+            var s = Mod.Active;
             if (!s.HasValue) { _activeText.text = "No active shipment."; return; }
 
             var shipment = s.Value;
@@ -957,7 +969,7 @@ namespace S1DockExports
         /// </list>
         /// <para><strong>Display Format:</strong></para>
         /// <para>
-        /// Calls <c>ToString()</c> on each <see cref="ShipmentHistoryEntry"/> in <c>_mod.History</c>.
+        /// Calls <c>ToString()</c> on each <see cref="ShipmentHistoryEntry"/> in <c>DockExportsMod.Instance?.History</c>.
         /// Each entry is displayed on a new line. Example:
         /// </para>
         /// <code>
@@ -966,14 +978,17 @@ namespace S1DockExports
         /// </code>
         /// <para><strong>Empty State:</strong></para>
         /// <para>
-        /// If <c>_mod.History</c> is null or empty, displays "No history."
+        /// If <c>DockExportsMod.Instance?.History</c> is null or empty, displays "No history."
         /// </para>
         /// </remarks>
         private void RefreshHistoryPanel()
         {
-            if (_mod.History == null || _mod.History.Count == 0) { _historyText.text = "No history."; return; }
+            if (_historyText == null) return;
+
+            var history = Mod.History;
+            if (history == null || history.Count == 0) { _historyText.text = "No history."; return; }
             var sb = new System.Text.StringBuilder();
-            foreach (var e in _mod.History) sb.AppendLine(e.ToString());
+            foreach (var e in history) sb.AppendLine(e.ToString());
             _historyText.text = sb.ToString();
         }
 

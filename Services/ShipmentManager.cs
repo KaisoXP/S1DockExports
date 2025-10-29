@@ -247,6 +247,29 @@ namespace S1DockExports.Services
 
             MelonLoader.MelonLogger.Msg($"[DockExports] Active: {activeInfo}, History: {_history.Count} entries, Cooldown: {(_wholesaleCooldownEndDay > 0 ? _wholesaleCooldownEndDay + " days" : "none")}");
 
+            // Backfill base unit prices for saves created before this field existed
+            if (_activeShipment.HasValue)
+            {
+                var shipment = _activeShipment.Value;
+                if (shipment.BaseUnitPrice <= 0)
+                {
+                    shipment.BaseUnitPrice = shipment.Type == ShipmentType.Consignment
+                        ? CalculateBasePrice(shipment.UnitPrice)
+                        : shipment.UnitPrice;
+                    _activeShipment = shipment;
+                }
+            }
+
+            foreach (var entry in _history)
+            {
+                if (entry.BaseUnitPrice <= 0)
+                {
+                    entry.BaseUnitPrice = entry.Type == ShipmentType.Consignment
+                        ? CalculateBasePrice(entry.UnitPrice)
+                        : entry.UnitPrice;
+                }
+            }
+
             // Notify UI that shipments have been loaded
             OnShipmentsLoaded?.Invoke();
         }
@@ -459,6 +482,7 @@ namespace S1DockExports.Services
                 Type = ShipmentType.Wholesale,
                 Quantity = quantity,
                 UnitPrice = brickPrice,
+                BaseUnitPrice = brickPrice,
                 TotalValue = totalValue,
                 TotalPaid = 0,
                 PaymentsMade = 0,
@@ -532,6 +556,7 @@ namespace S1DockExports.Services
                 Type = ShipmentType.Consignment,
                 Quantity = quantity,
                 UnitPrice = enhancedPrice,
+                BaseUnitPrice = brickPrice,
                 TotalValue = totalValue,
                 TotalPaid = 0,
                 PaymentsMade = 0,
@@ -547,6 +572,7 @@ namespace S1DockExports.Services
         /// Processes the wholesale shipment payment (instant, full payout).
         /// </summary>
         /// <param name="currentDay">Current in-game day number</param>
+        /// <returns>Total payout transferred to the player.</returns>
         /// <remarks>
         /// <para><strong>Wholesale Payment Logic:</strong></para>
         /// <list type="number">
@@ -573,16 +599,16 @@ namespace S1DockExports.Services
         /// ShipmentManager.Instance.CreateWholesaleShipment(100, 14700, currentDay);
         ///
         /// // Process payment immediately
-        /// ShipmentManager.Instance.ProcessWholesalePayment(currentDay);
+        /// int payout = ShipmentManager.Instance.ProcessWholesalePayment(currentDay);
         ///
-        /// // Player receives $1,470,000 instantly
+        /// // Player receives payout instantly (e.g., $1,470,000)
         /// // Wholesale is now on cooldown for 30 days
         /// </code>
         /// </example>
-        public void ProcessWholesalePayment(int currentDay)
+        public int ProcessWholesalePayment(int currentDay)
         {
             if (!_activeShipment.HasValue || _activeShipment.Value.Type != ShipmentType.Wholesale)
-                return;
+                return 0;
 
             var shipment = _activeShipment.Value;
             shipment.TotalPaid = shipment.TotalValue;
@@ -594,13 +620,16 @@ namespace S1DockExports.Services
 
             // Complete and archive
             CompleteActiveShipment();
+
+             return shipment.TotalValue;
         }
 
         /// <summary>
         /// Processes one weekly consignment payment with loss roll.
         /// </summary>
         /// <param name="lossPercent">Out parameter: Loss percentage (0-60%, or 0 if no loss)</param>
-        /// <returns>Actual payout amount after losses</returns>
+        /// <param name="floorTopUp">Out parameter: Additional funds added to match wholesale floor on final week.</param>
+        /// <returns>Actual payout amount after losses (including any floor top-up)</returns>
         /// <remarks>
         /// <para><strong>Consignment Payment Logic:</strong></para>
         /// <list type="number">
@@ -629,12 +658,12 @@ namespace S1DockExports.Services
         /// <example>
         /// Called by DockExportsMod every Friday:
         /// <code>
-        /// int actualPayout = ShipmentManager.Instance.ProcessConsignmentPayment(out int lossPercent);
+        /// int actualPayout = ShipmentManager.Instance.ProcessConsignmentPayment(out int lossPercent, out int floorTopUp);
         ///
         /// if (lossPercent > 0)
         /// {
         ///     // Loss occurred
-        ///     string msg = BrokerMessages.GetRandomLossMessage(weekNum, lossPercent, actualPayout, expectedPayout);
+        ///     string msg = BrokerMessages.GetRandomLossMessage(weekNum, lossPercent, actualPayout - floorTopUp, expectedPayout);
         ///     SendSMS("The Broker", msg);
         /// }
         /// else
@@ -647,11 +676,12 @@ namespace S1DockExports.Services
         /// AddMoneyToPlayer(actualPayout);
         /// </code>
         /// </example>
-        public int ProcessConsignmentPayment(out int lossPercent)
+        public int ProcessConsignmentPayment(out int lossPercent, out int floorTopUp)
         {
             if (!_activeShipment.HasValue || _activeShipment.Value.Type != ShipmentType.Consignment)
             {
                 lossPercent = 0;
+                floorTopUp = 0;
                 return 0;
             }
 
@@ -667,10 +697,23 @@ namespace S1DockExports.Services
 
             shipment.TotalPaid += actualPayout;
             shipment.PaymentsMade++;
+
+            floorTopUp = 0;
+            bool finalPayment = shipment.PaymentsMade >= DockExportsConfig.CONSIGNMENT_INSTALLMENTS;
+            if (finalPayment)
+            {
+                int floorValue = PriceHelper.CalculateWholesaleFloor(shipment.Quantity, shipment.BaseUnitPrice);
+                if (shipment.TotalPaid < floorValue)
+                {
+                    floorTopUp = floorValue - shipment.TotalPaid;
+                    shipment.TotalPaid += floorTopUp;
+                    actualPayout += floorTopUp;
+                }
+            }
+
             _activeShipment = shipment;
 
-            // Check if complete
-            if (shipment.PaymentsMade >= DockExportsConfig.CONSIGNMENT_INSTALLMENTS)
+            if (finalPayment)
             {
                 CompleteActiveShipment();
             }
@@ -714,6 +757,7 @@ namespace S1DockExports.Services
                 Type = shipment.Type,
                 Quantity = shipment.Quantity,
                 UnitPrice = shipment.UnitPrice,
+                BaseUnitPrice = shipment.BaseUnitPrice,
                 TotalValue = shipment.TotalValue,
                 TotalPaid = shipment.TotalPaid,
                 CompletedDate = DateTime.UtcNow
@@ -723,6 +767,18 @@ namespace S1DockExports.Services
         }
 
         #endregion
+
+        private static int CalculateBasePrice(int unitPrice)
+        {
+            if (unitPrice <= 0)
+                return 0;
+
+            double multiplier = DockExportsConfig.CONSIGNMENT_MULTIPLIER;
+            if (multiplier <= double.Epsilon)
+                return unitPrice;
+
+            return Math.Max(1, (int)Math.Round(unitPrice / multiplier));
+        }
 
         #region Data Management
 
@@ -841,6 +897,12 @@ namespace S1DockExports.Services
         public int UnitPrice;
 
         /// <summary>
+        /// Original base price per brick (used for floor protection calculations).
+        /// Matches <see cref="UnitPrice"/> for wholesale shipments and the pre-multiplier price for consignments.
+        /// </summary>
+        public int BaseUnitPrice;
+
+        /// <summary>
         /// Total expected value of the shipment.
         /// </summary>
         /// <remarks>
@@ -919,6 +981,11 @@ namespace S1DockExports.Services
         /// Price per brick at shipment creation.
         /// </summary>
         public int UnitPrice;
+
+        /// <summary>
+        /// Base price per brick (used for consignment floor comparisons).
+        /// </summary>
+        public int BaseUnitPrice;
 
         /// <summary>
         /// Total expected value (before losses).
