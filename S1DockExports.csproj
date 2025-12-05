@@ -19,7 +19,7 @@
 		<!-- Per-machine override:  $env:S1_GAME="D:\SteamLibrary\steamapps\common\Schedule I" -->
 		<GamePath Condition="'$(GamePath)'=='' and '$(S1_GAME)'!=''">$(S1_GAME)</GamePath>
 		<!-- Default path (edit if different) -->
-		<GamePath Condition="'$(GamePath)'==''">C:\Program Files (x86)\Steam\steamapps\common\Schedule I</GamePath>
+		<GamePath Condition="'$(GamePath)'==''">D:\SteamLibrary\steamapps\common\Schedule I_public</GamePath>
 	</PropertyGroup>
 
 	<!-- Shared paths for IL2CPP install -->
@@ -153,11 +153,8 @@
 		</Reference>
 	</ItemGroup>
 
-	<!-- S1API - Direct DLL reference (same version used by game) -->
 	<ItemGroup>
-		<Reference Include="S1API">
-			<HintPath>$(ModsPath)\S1API.dll</HintPath>
-		</Reference>
+	  <PackageReference Include="S1API.Forked" Version="2.7.6" />
 	</ItemGroup>
 
 	<!-- Fail fast if paths are wrong -->
@@ -176,9 +173,6 @@
 			<!-- Your mod -->
 			<_Ship Include="$(TargetPath)" />
 			<!-- S1API is already in Mods folder, don't copy it -->
-			<!-- FishNet runtime (only this one Il2Cpp DLL, to satisfy S1API's probe) -->
-			<_Ship Include="$(Il2CppAssembliesPath)\Il2CppFishNet.Runtime.dll"
-				   Condition="Exists('$(Il2CppAssembliesPath)\Il2CppFishNet.Runtime.dll')" />
 		</ItemGroup>
 		<Copy SourceFiles="@(_Ship)" DestinationFolder="$(ModsPath)" SkipUnchangedFiles="true" />
 	</Target>
